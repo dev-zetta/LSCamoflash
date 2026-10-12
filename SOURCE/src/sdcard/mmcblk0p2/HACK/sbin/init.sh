@@ -763,7 +763,9 @@ start_service_supervisor()
 			fi
 		}
 		trap 'stop_service_log_reader; exec 3<&-; exit 0' HUP INT TERM
-		"$busybox_hack" head -c 65536 <&3 &
+		# dd writes each short read immediately. head buffers short diagnostics
+		# until EOF, which daemons retaining the FIFO writer may never provide.
+		"$busybox_hack" dd bs=4096 count=65536 iflag=count_bytes status=none <&3 &
 		services_reader=$!
 		wait "$services_reader"
 		services_reader=""

@@ -79,6 +79,25 @@ esac
         self.assertIn("ash " + str(self.sbin / "services.sh"), calls)
         self.assertTrue((self.base / "services.run").exists())
 
+    def test_short_log_survives_daemon_retaining_fifo_writer(self):
+        writer_pid = self.base / "inherited-writer.pid"
+        try:
+            self.run_startup('''printf "%100s" x
+/bin/sleep 30 &
+printf "%s\\n" "$!" > "$sys_temp/inherited-writer.pid"
+: > "$sys_temp/services.run"
+''')
+            self.assertEqual((self.logs / "services-startup.log").read_bytes(), b" " * 99 + b"x")
+            # The writer is still alive: this assertion requires incremental
+            # logging, rather than an EOF flush after every service exits.
+            os.kill(int(writer_pid.read_text()), 0)
+        finally:
+            if writer_pid.exists():
+                try:
+                    os.kill(int(writer_pid.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
     def test_early_exit_without_readiness_releases_stock_startup(self):
         for status in (0, 17):
             with self.subTest(status=status):

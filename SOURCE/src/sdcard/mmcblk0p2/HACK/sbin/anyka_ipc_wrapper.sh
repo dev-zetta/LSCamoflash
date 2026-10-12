@@ -3,6 +3,31 @@
 # This is called by the firmware watchdog through the bind-mounted bootstrap.
 # Keep the camera process in the foreground so an exit can be restarted normally.
 export hack="${hack:-/tmp/sd/HACK}"
+
+# Opt-in stock logging also enables a small launch trace. Keep exec in this
+# process so the firmware watchdog still sees the stock application's PID.
+wrapper_diag_log=""
+wrapper_phase()
+{
+	[ -z "$wrapper_diag_log" ] || printf 'pid=%s phase=%s\n' "$$" "$1" >> "$wrapper_diag_log" 2>/dev/null
+	return 0
+}
+if [ -f "${sys_temp:-/tmp}/_ht_get_log.conf" ]; then
+	wrapper_diag_log="$hack/var/log/wrapper-status.log"
+	wrapper_diag_previous="$hack/var/log/wrapper-status.previous.log"
+	if [ ! -d "$hack/var/log" ] || [ -L "$hack/var/log" ] ||
+		[ -L "$wrapper_diag_log" ] || [ -L "$wrapper_diag_previous" ] ||
+		{ [ -e "$wrapper_diag_log" ] && [ ! -f "$wrapper_diag_log" ]; } ||
+		{ [ -e "$wrapper_diag_previous" ] && [ ! -f "$wrapper_diag_previous" ]; }; then
+		wrapper_diag_log=""
+	elif { [ ! -f "$wrapper_diag_log" ] || "$hack/bin/busybox" mv -f "$wrapper_diag_log" "$wrapper_diag_previous"; } &&
+		: > "$wrapper_diag_log"; then
+		wrapper_phase entry
+		trap 'wrapper_result=$?; trap - EXIT; wrapper_phase "exit:$wrapper_result"; exit "$wrapper_result"' EXIT
+	else
+		wrapper_diag_log=""
+	fi
+fi
 [ -f "$hack/etc/hack.conf" ] || exit 1
 . "$hack/etc/hack.conf" || exit 1
 if [ -f "$hack/etc/hack_custom.conf" ]; then
@@ -12,6 +37,7 @@ export busybox_hack="$sd_bin/busybox"
 export busybox_firmware="$sys_bin/busybox"
 [ -x "$busybox_hack" -a -x "$busybox_firmware" ] || exit 1
 . "$hack/etc/commands.conf" || exit 1
+wrapper_phase configuration-loaded
 
 stock_md5_line=$("$busybox_hack" md5sum "$sd_bin/anyka_ipc") || exit 1
 stock_md5=$(printf '%s\n' "$stock_md5_line" | $awk '{print $1}')
@@ -46,6 +72,7 @@ if [ "$anyka_md5" = "7c2a124cdd607ebef63fb66d063b6a87" -o "$stock_md5" = "7c2a12
 		exit 1
 	fi
 fi
+wrapper_phase identity-verified
 
 # Factory RTSP deliberately uses the stock firmware even if a dynamic or static
 # patch is installed. It also works without an IPS patch on some firmware builds.
@@ -66,9 +93,11 @@ fi
 
 [ -x "$anyka_ipc_bin" ] || { echo "Missing executable $anyka_ipc_bin" >&2; exit 1; }
 if [ -f "$sys_temp/anyka_ipc.lock" -o -f "$sys_temp/setup.lock" ]; then
+	wrapper_phase setup-locked
 	$sleep 60
 	exit 2
 fi
+[ ! -f "$sys_temp/_ak39_startlock.ini" ] || wrapper_phase start-locked
 while [ -f "$sys_temp/_ak39_startlock.ini" ]; do
 	$sleep 3
 done
@@ -139,6 +168,8 @@ case "$FORCE_STATE_LED_OFF" in
 esac
 
 if [ "$local_rtsp_only" = "1" ]; then
+	wrapper_phase exec-local-rtsp
 	exec "$busybox_hack" sh "$sd_sbin/anyka_rtsp.sh" "$anyka_md5"
 fi
+wrapper_phase exec-stock
 exec "$anyka_ipc_bin"

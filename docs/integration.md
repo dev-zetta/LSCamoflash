@@ -129,3 +129,18 @@ The default build, backup-kit build and both archive targets exited zero. The ar
 | --- | ---: | --- |
 | `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,191,999 | `629a53c28fc0659553e1e17b80e220e072fc0ebdedc83bca2687e0586358ac3d` |
 | `update-1.03.2412-uclibc.tgz` | 45,765,327 | `072bfd2a2b652d80e5152e6755defd049d1d6ae047e2fe3cc5df9226410f5d79` |
+
+## Stock handoff diagnostic checkpoint
+
+The second physical normal-mode attempt also stayed offline, without observed repeated restarts. Before modifying the returned card, all 745 built payload files matched it exactly. Both retained boots reached service readiness and init status 0, completing the hook roughly one minute after power-on, while service output logs were empty. This establishes successful initialization, not stock application startup or Wi-Fi association. The GPIO export warning and FAT-overlay symlink errors do not independently establish the offline cause. Stock pairing still works after a cold boot without the card.
+
+A separate fixture reproduced diagnostic loss: buffered `head` held a short message while a background child kept the FIFO writer open. Byte-counted `dd` now writes each short read immediately, preserving the existing 65,536-byte cap and excess-output drain. The opt-in stock `_ht_get_log.conf` marker additionally enables fixed wrapper launch phases and a detached sampler of filtered process, marker, mount, interface, route and WPA state at nominal 0/5/15/30/60-second offsets. The wrapper retains its direct same-PID exec. An `exec-stock` record means an exec attempt, not accepted application startup. Stock logging keeps `/mnt` mounted and produces private raw logs; its per-file rotation threshold does not cap total storage. The [camera guide](camera-3007325.5.md#first-boot-and-diagnostics) documents enabling, collecting and disabling these diagnostics. Their physical camera result remains open.
+
+The final local checks on 2026-10-12 all exited zero: the full host suite ran 291 cases in 29.046 seconds (255 executed, 36 optional ARM cases skipped), and the ARM926 suite passed all 291 in 71.712 seconds without skips. New regressions cover an inherited FIFO writer, wrapper log rotation and same-PID exec, failed launch phases, diagnostic opt-in gating, five sampled states, log-path rejection and exclusion of private or malformed WPA fields. The default build, backup kit and both runtime archives completed successfully. The artifact checker verified 146 source files, 119 ELF32 ARM files, 23 packaged program checks, two early-bootstrap ARM926 checks, and all 696 full-archive and 648 update-archive regular files against the build.
+
+These artifacts supersede the earlier local archive hashes above, retain the upstream version number and are development builds. No stable release or successful physical runtime is claimed.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,194,446 | `570dc3bbfb810e48df4450b6b447a725026a30c882d13fde55889c2c0538c827` |
+| `update-1.03.2412-uclibc.tgz` | 45,768,561 | `30dae50c575872c9501aabf31f883394d4c8e7c98a2f282003148182c9a1c7da` |

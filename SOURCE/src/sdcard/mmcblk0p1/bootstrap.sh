@@ -81,6 +81,11 @@ bootstrap_run_init() {
 		if [ "$setup_lock_owned" -eq 1 ]; then
 			"$log_busybox" rm -f /tmp/setup.lock
 		fi
+	elif [ -f "$boot_root/_ht_get_log.conf" ] && [ -f "$hack/sbin/boot_diagnostics.sh" ]; then
+		# Sample the subsequent stock handoff without delaying the vendor's
+		# startup. The opt-in marker also enables stock diagnostic logs.
+		"$log_busybox" sh "$hack/sbin/boot_diagnostics.sh" "$hack" </dev/null >/dev/null 2>&1 &
+		echo "LSCamoflash: post-init diagnostic sampler started"
 	fi
 	"$log_busybox" sync
 	return "$init_status"

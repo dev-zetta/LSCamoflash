@@ -5,6 +5,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -208,7 +209,8 @@ class PersistentBootstrapTests(unittest.TestCase):
         self.functions = self.functions.replace('/tmp/anyka_ipc_wrapper.sh', str(self.wrapper))
         self.functions = self.functions.replace('/usr/bin/anyka_ipc', str(self.application))
         self.functions = self.functions.replace('/proc/mounts', str(self.mounts))
-        self.env = dict(os.environ, sd_path=str(self.root), init=str(self.init), CALLS=str(self.calls))
+        self.env = dict(os.environ, sd_path=str(self.root), hack=str(self.hack), boot_root=str(self.root),
+                        init=str(self.init), CALLS=str(self.calls))
 
     def run_boot(self, run_init=True, short_deadline=False):
         functions = self.functions
@@ -272,3 +274,21 @@ class PersistentBootstrapTests(unittest.TestCase):
         self.init.write_text('exit 19\n')
         self.assertEqual(self.run_boot().returncode, 19)
         self.assertTrue(self.lock.is_symlink())
+
+    def test_handoff_sampler_is_opt_in_and_only_follows_success(self):
+        helper = self.hack / 'sbin/boot_diagnostics.sh'
+        helper.parent.mkdir()
+        helper.write_text('printf ready > "$1/sampled"\n')
+        sampled = self.hack / 'sampled'
+        self.assertEqual(self.run_boot().returncode, 0)
+        self.assertFalse(sampled.exists())
+        (self.root / '_ht_get_log.conf').touch()
+        self.assertEqual(self.run_boot().returncode, 0)
+        deadline = time.monotonic() + 3
+        while not sampled.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual(sampled.read_text(), 'ready')
+        sampled.unlink()
+        self.init.write_text('exit 19\n')
+        self.assertEqual(self.run_boot().returncode, 19)
+        self.assertFalse(sampled.exists())

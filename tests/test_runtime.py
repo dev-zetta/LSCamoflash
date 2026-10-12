@@ -63,6 +63,7 @@ class RuntimeTests(unittest.TestCase):
                               'if [ "$1" = sha256sum ]; then\n'
                               '  printf "%s  %s\\n" "$test_sha256" "$2"\n'
                               '  exit "${test_sha256_status:-0}"\nfi\n'
+                              'if [ "$1" = mv ]; then shift; exec mv "$@"; fi\n'
                               '[ "$1" = sh ] || exit 90\nshift\nexec ' + shlex.join(RUNTIME_SHELL) + ' "$@"\n')
         shutil.copy2(self.paths["sd_bin"] / "busybox", self.paths["sys_bin"] / "busybox")
         for name in ("anyka_ipc_wrapper.sh", "anyka_rtsp.sh"):
@@ -420,6 +421,54 @@ exit {status}
                 self.assertFalse((self.paths["sys_temp"] / "launched").exists())
                 self.assertFalse((self.paths["sys_temp"] / "_ak39_factory.ini").exists())
                 self.assertFalse((self.paths["sys_temp"] / "_ht_ap_mode.conf").exists())
+
+    def enable_wrapper_diagnostics(self):
+        logs = self.hack / "var/log"
+        logs.mkdir(parents=True, exist_ok=True)
+        (self.paths["sys_temp"] / "_ht_get_log.conf").touch()
+        return logs
+
+    def test_opt_in_wrapper_trace_keeps_exec_pid_and_rotates(self):
+        logs = self.enable_wrapper_diagnostics()
+        self.write_executable(self.stock, '#!/bin/sh\nprintf "%s\\n" "$$" > "$sys_temp/stock.pid"\nexit 47\n')
+        result = self.wrapper()
+        self.assertEqual(result.returncode, 47, result.stderr)
+        trace = (logs / "wrapper-status.log").read_text()
+        self.assertIn("phase=configuration-loaded", trace)
+        self.assertIn("phase=identity-verified", trace)
+        self.assertIn("phase=exec-stock", trace)
+        self.assertNotIn("phase=exit:", trace)
+        pid = (self.paths["sys_temp"] / "stock.pid").read_text().strip()
+        self.assertTrue(all(line.startswith(f"pid={pid} ") for line in trace.splitlines()))
+        self.assertEqual(self.wrapper().returncode, 47)
+        self.assertEqual((logs / "wrapper-status.previous.log").read_text(), trace)
+
+    def test_wrapper_trace_records_early_failure_and_lock_status(self):
+        logs = self.enable_wrapper_diagnostics()
+        (self.paths["sys_temp"] / "setup.lock").touch()
+        self.assertEqual(self.wrapper().returncode, 2)
+        trace = (logs / "wrapper-status.log").read_text()
+        self.assertIn("phase=setup-locked", trace)
+        self.assertIn("phase=exit:2", trace)
+        self.assertNotIn("phase=exec-stock", trace)
+        (self.paths["sys_temp"] / "setup.lock").unlink()
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256="0" * 64)
+        self.assertEqual(self.wrapper(SI_L25502_MD5).returncode, 1)
+        trace = (logs / "wrapper-status.log").read_text()
+        self.assertIn("phase=exit:1", trace)
+        self.assertNotIn("phase=identity-verified", trace)
+
+    def test_wrapper_diagnostic_files_are_opt_in_and_never_follow_symlinks(self):
+        logs = self.hack / "var/log"
+        logs.mkdir(parents=True)
+        self.assertEqual(self.wrapper().returncode, 0)
+        self.assertFalse((logs / "wrapper-status.log").exists())
+        self.enable_wrapper_diagnostics()
+        outside = self.base / "preserved"
+        outside.write_text("keep")
+        (logs / "wrapper-status.log").symlink_to(outside)
+        self.assertEqual(self.wrapper().returncode, 0)
+        self.assertEqual(outside.read_text(), "keep")
 
     def test_si_l25502_profile_works_with_preserved_pre_profile_checksum_config(self):
         legacy = self.paths["sd_etc"] / "old-checksums.conf"
