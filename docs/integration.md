@@ -116,3 +116,16 @@ The subsequent 3007325.5 work added the native SD entry, single-FAT runtime layo
 | `update-1.03.2412-uclibc.tgz` | 45,764,626 | `44b154ea101837121cf8c881510848d186a47f4221bd7dcf42ad9e795a875753` |
 
 These hashes identify the local development artifacts for this validation; the upstream version number remains unchanged and no stable release was published. The [camera guide](camera-3007325.5.md#binary-evidence-and-acceptance) records the remaining physical runtime gates. Successful backup verification, fixtures and QEMU execution do not establish camera boot, decoded RTSP frames, ONVIF discovery, custom PTZ control or flash restoration.
+
+The first physical normal-mode runtime attempt subsequently failed to provide app access. The staged files matched the build and initialization reached backups and the overlay, but RAM logs did not survive power-off. Stock pairing and app access worked without the SD card. The exact profile now preserves the current stock software-settings file without applying the generic template. Bootstrap records persistent boot/init diagnostics with one previous boot, runs init through static BusyBox with a 600-second deadline and five-second forced-kill grace period, and attempts limited owned-wrapper/setup-lock cleanup on failure. Init checks supervisor liveness and bounds first service readiness to 45 nominal seconds, retaining at most 64 KiB of startup service output. These changes address observed software gaps; they do not establish the cause of the failed boot or successful runtime recovery. See the [camera diagnostics guide](camera-3007325.5.md#first-boot-and-diagnostics) for the timing limits, private log collection and distinction between stock-managed pairing and opt-in local RTSP.
+
+## Startup hardening validation
+
+The subsequent startup-hardening checkpoint passed the full host suite on 2026-10-12: 279 cases, 243 executed and 36 optional ARM cases skipped, in 29.238 seconds. With the ARM926 shell and backup environment enabled, all 279 cases passed in 69.858 seconds. New fixtures cover early service exit, hung first and later invocations, actual child and logger cleanup after a signal, newline-free diagnostic output capped at 65,536 bytes while excess output drains, stock software-settings byte identity, persistent log rotation, timeout status, conditional application-bind cleanup and pre-existing setup-lock preservation. Successful initialization now explicitly returns zero when optional hooks are absent; configured post-service hook failures still propagate.
+
+The default build, backup-kit build and both archive targets exited zero. The artifact checker verified 145 source files, 119 ELF32 ARM files, 23 packaged program checks and two early-bootstrap ARM926 checks, and compared every regular archive file against the build. These replacement local development artifacts retain the upstream version number; no stable release or successful camera runtime is claimed.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,191,999 | `629a53c28fc0659553e1e17b80e220e072fc0ebdedc83bca2687e0586358ac3d` |
+| `update-1.03.2412-uclibc.tgz` | 45,765,327 | `072bfd2a2b652d80e5152e6755defd049d1d6ae047e2fe3cc5df9226410f5d79` |

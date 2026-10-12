@@ -6,6 +6,12 @@ The traditional LSCamoflash layout uses two FAT32 partitions, with the runtime o
 
 Run the commands below from the generated `SOURCE/build/` directory or an unpacked full release root. The `mmcblk0p1/` and `mmcblk0p2/` copy paths are relative to that directory.
 
+For the exact 3007325.5 profile, leave `local_rtsp_only` and `wifi_config_override` unset to test stock-managed Tuya pairing. Local RTSP requires the separate explicit Wi-Fi configuration in the camera guide. The first physical runtime attempt failed to provide app access; pairing without the SD card worked. Startup hardening and persistent diagnostics require another camera test before runtime acceptance can be claimed.
+
+First initialization can take several minutes to create backups and the overlay, and setup changes can request a reboot after a 60-second delay. Init has a 600-second deadline with a five-second forced-kill grace period; the first services readiness wait is limited to 45 nominal seconds. The init deadline starts after station reload, staged updates and custom pre-init hooks, and does not guarantee termination of stuck kernel I/O. These bounds are software checks, not physical acceptance.
+
+For a failed boot, power off before removing the card and preserve `HACK/var/log/boot.log`, `init.log`, `init.err`, their `*.previous.*` counterparts and `services-startup.log` before retrying. Service startup output is capped at 64 KiB; boot and init logs retain one previous boot without a byte cap. Keep logs, `HACK/backup/` and generated configuration private. See the [camera diagnostics guide](https://github.com/dev-zetta/LSCamoflash/blob/main/docs/camera-3007325.5.md#first-boot-and-diagnostics) for the exact file names and best-effort failure cleanup; no full rollback is guaranteed.
+
 ### Partition Requirements:
 - **Partition 1 (`mmcblk0p1`)**: At least **14GB**, formatted as **FAT32**.
   - Stores video recordings as well as `hostapd` and `_ht_ap_mode.conf`.

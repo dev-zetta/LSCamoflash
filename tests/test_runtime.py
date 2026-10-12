@@ -591,6 +591,26 @@ exit {status}
         self.assertFalse((self.paths["sys_temp"] / "patcher_invoked").exists())
         self.assertFalse((self.paths["sys_temp"] / "setup.lock").exists())
 
+    def test_stock_only_software_schema_and_bytes_are_preserved(self):
+        stock = self.paths["sys_config"] / "_ht_sw_settings.ini"
+        cached = self.paths["sd_config"] / "_ht_sw_settings.ini"
+        template = self.paths["sd_config"] / "_ht_sw_config.tmpl"
+        original = b'; vendor formatting\r\n[config]\r\nbool_paired = 1\r\n:vendor_key = 7\r\n'
+        stock.write_bytes(original)
+        template.write_text('bool_has_config_wifi = 1\nint_unrelated_model_setting = 10\n')
+        self.env["device_stock_binary_only"] = "1"
+        for prior_copy in (None, b'[config]\nbool_has_config_wifi = 0\n'):
+            with self.subTest(existing_cache=prior_copy is not None):
+                if prior_copy is None:
+                    cached.unlink(missing_ok=True)
+                else:
+                    cached.write_bytes(prior_copy)
+                result = self.snippet("# Check, whether _ht_sw_settings.ini exists", "# Check, whether libavssdkbeta.so exists")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(stock.read_bytes(), original)
+                self.assertEqual(cached.read_bytes(), original)
+                self.assertNotIn(b'bool_has_config_wifi', stock.read_bytes())
+
     def test_failed_patch_keeps_stock_and_does_not_record_checksum_or_reboot(self):
         digest = hashlib.md5(self.stock.read_bytes()).hexdigest()
         (self.paths["sd_patch"] / f"{digest}.ips.gz").touch()

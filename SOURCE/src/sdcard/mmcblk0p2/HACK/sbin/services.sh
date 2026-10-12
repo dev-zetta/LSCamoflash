@@ -528,7 +528,10 @@ fi
 [ -n "$custom_post_services" -a -x "$custom_post_services" ] && $custom_post_services
 
 # Touch services.run and tell the system, that the script is alive
-touch $services_run >/dev/null 2>&1
+"$busybox_hack" touch "$services_run" || {
+	echo "ERROR: Cannot publish services readiness" >&2
+	exit 1
+}
 
 # Update script path
 update="$sd_sbin/update.sh"

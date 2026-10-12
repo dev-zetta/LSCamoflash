@@ -1,6 +1,7 @@
 """Native SD entry and mount regressions; no real mounts or camera programs."""
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -105,7 +106,7 @@ class StageMountTests(unittest.TestCase):
                         sd_dev=str(self.root / 'mmcblk0p2'), hack_conf=str(self.boot / 'HACK/etc/hack.conf'),
                         init=str(self.boot / 'HACK/sbin/init.sh'), MOUNT_LOG=str(self.log))
         start = STAGE.index('\tmkdir -p "$sd_path"')
-        end = STAGE.index('\n\t# Leave AP mode', start)
+        end = STAGE.index('\n\t# Persist boot diagnostics', start)
         self.block = STAGE[start:end].replace('/proc/mounts', str(self.mounts))
         # A fixture file replaces the block-device predicate only in this test.
         self.block = self.block.replace('[ -b "$sd_dev" ]', '[ -f "$sd_dev" ]')
@@ -172,3 +173,102 @@ class StageMountTests(unittest.TestCase):
                 self.log.unlink()
             else:
                 self.assertFalse(self.log.exists())
+
+
+@unittest.skipUnless(shutil.which('busybox'), 'host BusyBox required')
+class PersistentBootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='camoflash-boot-logs-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.hack = self.root / 'HACK'
+        self.logs = self.hack / 'var/log'
+        self.logs.mkdir(parents=True)
+        (self.hack / 'bin').mkdir()
+        self.lock = self.root / 'setup.lock'
+        self.wrapper = self.root / 'wrapper'
+        self.application = self.root / 'application'
+        self.mounts = self.root / 'mounts'
+        self.mounts.touch()
+        self.calls = self.root / 'calls'
+        self.init = self.root / 'init'
+        self.init.write_text('#!/missing-shell\necho initialized\necho diagnostic >&2\nexit 0\n')
+        self.init.chmod(0o755)
+        # Only unmount is intercepted. All shell, timeout, log and file operations
+        # use the real selected BusyBox; no fixture touches a host mount or /tmp lock.
+        runtime = shlex.split(os.environ.get('CAMOFLASH_RUNTIME_SHELL', 'busybox ash'))[:-1]
+        program = self.hack / 'bin/busybox'
+        program.write_text('#!/bin/sh\nif [ "$1" = umount ]; then\n'
+                           ' printf "%s\\n" "$*" >> "$CALLS"; exit 0\nfi\nexec ' +
+                           shlex.join(runtime) + ' "$@"\n')
+        program.chmod(0o755)
+        start = STAGE.index('bootstrap_prepare_logs() {')
+        end = STAGE.index('\n# Hostapd and config', start)
+        self.functions = STAGE[start:end].replace('/tmp/setup.lock', str(self.lock))
+        self.functions = self.functions.replace('/tmp/anyka_ipc_wrapper.sh', str(self.wrapper))
+        self.functions = self.functions.replace('/usr/bin/anyka_ipc', str(self.application))
+        self.functions = self.functions.replace('/proc/mounts', str(self.mounts))
+        self.env = dict(os.environ, sd_path=str(self.root), init=str(self.init), CALLS=str(self.calls))
+
+    def run_boot(self, run_init=True, short_deadline=False):
+        functions = self.functions
+        if short_deadline:
+            functions = functions.replace('timeout -k 5 600', 'timeout -k 1 1')
+        command = functions + '\nbootstrap_prepare_logs || exit 23\n'
+        if run_init:
+            command += 'bootstrap_run_init\n'
+        shell = shlex.split(os.environ.get('CAMOFLASH_RUNTIME_SHELL', 'busybox ash'))
+        return subprocess.run(shell + ['-c', command], env=self.env, capture_output=True, text=True, timeout=8)
+
+    def test_logs_persist_and_rotate_one_previous_boot(self):
+        for name in ('boot.log', 'init.log', 'init.err'):
+            (self.logs / name).write_text('old ' + name)
+        result = self.run_boot()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('init finished with status 0', (self.logs / 'boot.log').read_text())
+        self.assertEqual((self.logs / 'init.log').read_text(), 'initialized\n')
+        self.assertEqual((self.logs / 'init.err').read_text(), 'diagnostic\n')
+        self.assertEqual((self.logs / 'init.previous.log').read_text(), 'old init.log')
+        self.assertEqual((self.logs / 'init.previous.err').read_text(), 'old init.err')
+        self.assertEqual((self.logs / 'boot.previous.log').read_text(), 'old boot.log')
+        # Invalid shebang above proves the explicit BusyBox shell executes init.
+        self.assertEqual(result.stdout, '')
+
+    def test_symlink_or_directory_log_is_rejected_before_truncation(self):
+        outside = self.root / 'outside'
+        outside.write_text('preserve')
+        log = self.logs / 'init.log'
+        log.symlink_to(outside)
+        self.assertEqual(self.run_boot().returncode, 23)
+        self.assertEqual(outside.read_text(), 'preserve')
+        log.unlink()
+        log.mkdir()
+        self.assertEqual(self.run_boot().returncode, 23)
+
+    def test_failed_init_releases_only_matching_bind_and_owned_lock(self):
+        self.init.write_text(f'echo lock > {shlex.quote(str(self.lock))}\nexit 19\n')
+        self.wrapper.write_text('our wrapper')
+        self.application.write_text('our wrapper')
+        self.mounts.write_text(f'/dev/fixture {self.application} vfat rw 0 0\n')
+        result = self.run_boot()
+        self.assertEqual(result.returncode, 19)
+        self.assertFalse(self.lock.exists())
+        self.assertEqual(self.calls.read_text(), f'umount {self.application}\n')
+        self.calls.unlink()
+        self.lock.write_text('existing')
+        self.application.write_text('different')
+        self.assertEqual(self.run_boot().returncode, 19)
+        self.assertEqual(self.lock.read_text(), 'lock\n')
+        self.assertFalse(self.calls.exists())
+
+    def test_hung_init_times_out_and_persists_status(self):
+        self.init.write_text('while :; do sleep 1; done\n')
+        result = self.run_boot(short_deadline=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f'init finished with status {result.returncode}', (self.logs / 'boot.log').read_text())
+
+    def test_preexisting_dangling_setup_lock_is_not_owned(self):
+        self.lock.symlink_to(self.root / 'absent')
+        self.init.write_text('exit 19\n')
+        self.assertEqual(self.run_boot().returncode, 19)
+        self.assertTrue(self.lock.is_symlink())

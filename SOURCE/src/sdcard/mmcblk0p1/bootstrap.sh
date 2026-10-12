@@ -32,9 +32,59 @@ export custom_pre_services_once_async="/tmp/sd/CUSTOM/pre_services_once_async.sh
 sd_dev="/dev/mmcblk0p2"
 sd_path="/tmp/sd"
 
-# Logging
-hack_log="/tmp/hostapd.log"
-hack_err="/tmp/hostapd.err"
+# Persist diagnostics before driver reload or runtime initialization. The stock
+# clock may start in 2000, so keep the previous boot rather than timestamp names.
+bootstrap_prepare_logs() {
+	log_busybox="$sd_path/HACK/bin/busybox"
+	log_dir="$sd_path/HACK/var/log"
+	[ -x "$log_busybox" ] && [ ! -L "$log_dir" ] || return 1
+	"$log_busybox" mkdir -p "$log_dir" || return 1
+	for log_name in boot.log boot.previous.log init.log init.previous.log init.err init.previous.err; do
+		log_file="$log_dir/$log_name"
+		[ ! -L "$log_file" ] && { [ ! -e "$log_file" ] || [ -f "$log_file" ]; } || return 1
+	done
+	for log_name in boot.log init.log init.err; do
+		case "$log_name" in
+			boot.log) log_previous=boot.previous.log ;;
+			init.log) log_previous=init.previous.log ;;
+			init.err) log_previous=init.previous.err ;;
+		esac
+		if [ -f "$log_dir/$log_name" ]; then
+			"$log_busybox" mv -f "$log_dir/$log_name" "$log_dir/$log_previous" || return 1
+		fi
+		: > "$log_dir/$log_name" || return 1
+	done
+	hack_log="$log_dir/init.log"
+	hack_err="$log_dir/init.err"
+	exec >> "$log_dir/boot.log" 2>&1
+	echo "LSCamoflash: card runtime mounted; starting boot hook"
+	"$log_busybox" date
+}
+
+bootstrap_run_init() {
+	# Stock startup waits synchronously for this hook. Never wait forever for
+	# a failed service or a child using the stock dynamic shell/loader.
+	setup_lock_owned=1
+	[ ! -e /tmp/setup.lock ] && [ ! -L /tmp/setup.lock ] || setup_lock_owned=0
+	echo "LSCamoflash: init begin (600 second deadline)"
+	"$log_busybox" timeout -k 5 600 "$log_busybox" sh "$init" > "$hack_log" 2> "$hack_err"
+	init_status=$?
+	echo "LSCamoflash: init finished with status $init_status"
+	if [ "$init_status" -ne 0 ]; then
+		# Undo only our verified application bind. This is best effort, not a
+		# rollback of arbitrary custom hooks or network configuration.
+		if [ -f /tmp/anyka_ipc_wrapper.sh ] &&
+			"$log_busybox" awk '$2 == "/usr/bin/anyka_ipc" { found=1 } END { exit !found }' /proc/mounts &&
+			"$log_busybox" cmp -s /tmp/anyka_ipc_wrapper.sh /usr/bin/anyka_ipc; then
+			"$log_busybox" timeout -k 1 5 "$log_busybox" umount /usr/bin/anyka_ipc || echo "LSCamoflash: application bind cleanup failed"
+		fi
+		if [ "$setup_lock_owned" -eq 1 ]; then
+			"$log_busybox" rm -f /tmp/setup.lock
+		fi
+	fi
+	"$log_busybox" sync
+	return "$init_status"
+}
 
 # Hostapd and config
 hostapd="$boot_root/hostapd.real"
@@ -95,6 +145,9 @@ else
 	fi
 	[ -f "$hack_conf" ] && [ -x "$init" ] || exit 1
 
+	# Persist boot diagnostics on the verified card before changing AP state.
+	bootstrap_prepare_logs || exit 1
+
 	# Leave AP mode before the normal vendor runtime starts. The .125 ATBM
 	# driver does not revisit WIFI_MODE after this synchronous boot hook.
 	rm -f /tmp/_ht_ap_mode.conf
@@ -104,7 +157,13 @@ else
 		7c2a124cdd607ebef63fb66d063b6a87)
 			# Native entry execs BusyBox: this process is no longer hostapd,
 			# which the vendor's station reload explicitly kills by name.
-			/usr/sbin/wifi_driver_atbm6132c.sh sta || exit 1
+			echo "LSCamoflash: reloading ATBM station driver"
+			/usr/sbin/wifi_driver_atbm6132c.sh sta || {
+				echo "LSCamoflash: station driver reload failed"
+				"$log_busybox" sync
+				exit 1
+			}
+			echo "LSCamoflash: station driver reload finished"
 			;;
 	esac
 
@@ -128,9 +187,10 @@ else
 					exit 1
 				}
 			fi
-		) || exit 1
+		) || { "$log_busybox" sync; exit 1; }
 	fi
 	# Network update checks remain in services.sh after normal initialization.
+	echo "LSCamoflash: staged update phase finished"
 
 	# Execute pre_init_async.sh
 	[ -n "$custom_pre_init_async" -a -x "$custom_pre_init_async" ] && $custom_pre_init_async &
@@ -146,6 +206,6 @@ else
 		reboot
 	else
 		# Run init script
-		"$init" >"$hack_log" 2>"$hack_err"
+		bootstrap_run_init
 	fi
 fi

@@ -81,6 +81,32 @@ if [ -n "$system_hostname" ]; then
         $hostname $(echo $system_hostname | $cut -d . -f1)
 fi
 
+# Stop only this init's children on failure, including an outer timeout signal.
+# Successful initialization leaves the network monitor and supervisor running.
+network_pid=""
+services_supervisor=""
+finish_init()
+{
+	local init_result=$? init_child init_child_parent
+	trap - EXIT HUP INT TERM
+	if [ "$init_result" -ne 0 ]; then
+		for init_child in "$services_supervisor" "$network_pid"; do
+			case "$init_child" in ''|*[!0-9]*) continue;; esac
+			init_child_parent=$("$busybox_hack" awk '$1 == "PPid:" {print $2}' "/proc/$init_child/status" 2>/dev/null)
+			[ "$init_child_parent" = "$$" ] || continue
+			if [ "$init_child" = "$services_supervisor" ]; then
+				"$busybox_hack" kill "$init_child" >/dev/null 2>&1 || true
+			else
+				"$busybox_hack" kill -KILL "$init_child" >/dev/null 2>&1 || true
+			fi
+			wait "$init_child" >/dev/null 2>&1 || true
+		done
+	fi
+	exit "$init_result"
+}
+trap finish_init EXIT
+trap 'echo "ERROR: Initialization interrupted" >&2; exit 1' HUP INT TERM
+
 # Initialize network
 [ -n "$network_file" ] || { echo "ERROR: Missing network status path"; exit 1; }
 $rm -f "$network_file" || exit 1
@@ -566,6 +592,13 @@ if [ -e $sd_config/_ht_hw_settings.ini ]; then
 fi
 
 # Check, whether _ht_sw_settings.ini exists and add missing template data if required
+if [ "${device_stock_binary_only:-0}" = "1" ]; then
+	# The exact recovered build owns this schema. Keep its persistent file and
+	# values intact; a generic template can change firmware network state.
+	echo "Preserving stock software settings for this firmware profile"
+	[ -f "$sys_config/_ht_sw_settings.ini" ] && \
+		$cp "$sys_config/_ht_sw_settings.ini" "$sd_config/_ht_sw_settings.ini" || exit 1
+else
 if [ ! -e $sd_config/_ht_sw_settings.ini ]; then
 	echo -n "Creating _ht_sw_settings.ini file..."
 	$cp $sys_config/_ht_sw_settings.ini $sd_config && echo "done" || echo "failed" 
@@ -603,6 +636,7 @@ if [ -e $sd_config/_ht_sw_settings.ini ]; then
 		$awk 'FNR==NR{ if($0 ~ /=/){ split($0,a,"="); k=a[1]; gsub(/^[ \t]+|[ \t]+$/,"",k); cnt[k]++ } next }{ if($0 ~ /=/){ split($0,a,"="); k=a[1]; gsub(/^[ \t]+|[ \t]+$/,"",k); cnt[k]--; if(cnt[k]==0) print $0 } else print $0 }' "$sys_temp/_ht_sw_settings.ini.sanitize" "$sys_temp/_ht_sw_settings.ini.sanitize" > "$sys_temp/_ht_sw_settings.ini.clean" && $mv "$sys_temp/_ht_sw_settings.ini.clean" "$sys_config/_ht_sw_settings.ini"
 	fi
 	compare $sys_config/_ht_sw_settings.ini $sd_config/_ht_sw_settings.ini || $cp $sys_config/_ht_sw_settings.ini $sd_config 
+fi
 fi
 
 # Check, whether libavssdkbeta.so exists
@@ -711,6 +745,78 @@ fi
 # Sync anything
 $sync
 
+# Start and supervise services without blocking the stock startup indefinitely.
+start_service_supervisor()
+{
+	local services_pipe="$sys_temp/services-startup.pipe.$$" services_child="" services_logger="" services_result
+	drain_service_log()
+	{
+		local services_reader=""
+		# Async commands can have fd 0 replaced with /dev/null before <&0 is
+		# applied. Retain the FIFO on a separate descriptor for both readers.
+		exec 3<&0
+		stop_service_log_reader()
+		{
+			if [ -n "$services_reader" ]; then
+				"$busybox_hack" kill -KILL "$services_reader" >/dev/null 2>&1 || true
+				wait "$services_reader" >/dev/null 2>&1 || true
+			fi
+		}
+		trap 'stop_service_log_reader; exec 3<&-; exit 0' HUP INT TERM
+		"$busybox_hack" head -c 65536 <&3 &
+		services_reader=$!
+		wait "$services_reader"
+		services_reader=""
+		"$busybox_hack" cat <&3 > /dev/null &
+		services_reader=$!
+		wait "$services_reader"
+		services_reader=""
+		exec 3<&-
+		trap - HUP INT TERM
+	}
+	cleanup_service_startup()
+	{
+		if [ -n "$services_child" ]; then
+			"$busybox_hack" kill -KILL "$services_child" >/dev/null 2>&1 || true
+			wait "$services_child" >/dev/null 2>&1 || true
+		fi
+		if [ -n "$services_logger" ]; then
+			"$busybox_hack" kill "$services_logger" >/dev/null 2>&1 || true
+			wait "$services_logger" >/dev/null 2>&1 || true
+		fi
+		"$busybox_hack" rm -f "$services_pipe"
+	}
+	trap 'cleanup_service_startup; exit 1' HUP INT TERM
+	"$busybox_hack" mkfifo "$services_pipe" || exit 1
+	# Drain all output while retaining at most 64 KiB. Keep the logger separate
+	# from the service process so its output limit does not kill a service.
+	drain_service_log < "$services_pipe" > "$sd_log/services-startup.log" &
+	services_logger=$!
+	"$busybox_hack" timeout -k 5 60 "$busybox_hack" ash "$sd_sbin/services.sh" > "$services_pipe" 2>&1 &
+	services_child=$!
+	wait "$services_child"
+	services_result=$?
+	services_child=""
+	# Allow the reader to consume the final pipe buffer. Background service
+	# daemons may retain a writer FD, so never require EOF to continue startup.
+	"$busybox_hack" sleep 1
+	cleanup_service_startup
+	services_logger=""
+	if [ ! -f "$sys_temp/services.run" ]; then
+		echo "ERROR: First services process exited before readiness (status $services_result)"
+		exit 1
+	fi
+	while [ ! -f "$breakout_file" ]; do
+		"$busybox_hack" sleep 30
+		[ ! -f "$breakout_file" ] || break
+		"$busybox_hack" timeout -k 5 60 "$busybox_hack" ash "$sd_sbin/services.sh" >/dev/null 2>&1 &
+		services_child=$!
+		wait "$services_child"
+		services_child=""
+	done
+	trap - HUP INT TERM
+}
+
 # Run services.sh on SD card every 30 seconds
 if [ -x "$sd_sbin/services.sh" ]; then
 	# Custom scripts run once before services
@@ -723,15 +829,42 @@ if [ -x "$sd_sbin/services.sh" ]; then
 		$reboot
 	else
 		echo "Running services.sh"
-    		(while true; do if [ -f "$breakout_file" ]; then break; else $sd_sbin/services.sh; $sleep 30; fi; done ) < /dev/null >& /dev/null &
-     		while [ ! -f $sys_temp/services.run ]; do
-			$sleep 1
-       		done
+		"$busybox_hack" rm -f "$sys_temp/services.run" || exit 1
+		if [ -f "$sd_log/services-startup.log" ]; then
+			"$busybox_hack" mv -f "$sd_log/services-startup.log" "$sd_log/services-startup.previous.log" || exit 1
+		fi
+		start_service_supervisor < /dev/null &
+		services_supervisor=$!
+		services_wait=0
+		while [ ! -f "$sys_temp/services.run" ]; do
+			if ! "$busybox_hack" kill -0 "$services_supervisor" 2>/dev/null; then
+				wait "$services_supervisor" >/dev/null 2>&1 || true
+				echo "ERROR: Services stopped before readiness; releasing stock startup"
+				exit 1
+			fi
+			if [ "$services_wait" -ge 45 ]; then
+				echo "ERROR: Services readiness timed out; releasing stock startup"
+				"$busybox_hack" kill "$services_supervisor" >/dev/null 2>&1 || true
+				wait "$services_supervisor" >/dev/null 2>&1 || true
+				exit 1
+			fi
+			"$busybox_hack" sleep 1
+			services_wait=$((services_wait + 1))
+		done
        	fi
 	# Custom scripts run once after services
-	[ -n "$custom_post_services_once_async" -a -x "$custom_post_services_once_async" ] && $custom_post_services_once_async &
-	[ -n "$custom_post_services_once" -a -x "$custom_post_services_once" ] && $custom_post_once_services
+	if [ -n "$custom_post_services_once_async" ] && [ -x "$custom_post_services_once_async" ]; then
+		"$custom_post_services_once_async" &
+	fi
+	if [ -n "$custom_post_services_once" ] && [ -x "$custom_post_services_once" ]; then
+		"$custom_post_services_once" || exit 1
+	fi
 else
 	echo "No services.sh file. Exitting."
 	exit 1
 fi
+
+# Initialization completed; optional absent hooks are not a startup failure.
+services_supervisor=""
+network_pid=""
+exit 0
