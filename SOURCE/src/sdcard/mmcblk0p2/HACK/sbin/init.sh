@@ -7,7 +7,7 @@ rm -f /etc/config/logseq* /etc/config/log_seq_stat >/dev/null 2>&1 || true
 
 # Check, whether we were called from hostapd script and load configs
 [ -n "$hack" -a -n "$hack_conf" -a -f "$hack_conf" ] && . $hack_conf && echo "Configuration loaded from: $hack_conf" || exit 1
-[ -n "$hack_custom_conf" ] && . $hack_custom_conf && echo "Custom configuration override loaded from: $hack_custom_conf"
+[ -n "$hack_custom_conf" -a -f "$hack_custom_conf" ] && . "$hack_custom_conf" && echo "Custom configuration override loaded from: $hack_custom_conf"
 
 # Redefine variables for next scripts (in case of /mnt is unmounted)
 export hack="$sd_path/HACK"
@@ -172,7 +172,8 @@ if [ -f "$sys_usr_bin/anyka_ipc" ]; then
         		export device_supported=1
 	        ;;
 	        *)
-	        	echo "WARNING: Unsupported device"
+			echo "WARNING: Unknown firmware profile; management services can still start"
+			echo "No binary patch is validated for checksum $anyka_md5; factory RTSP is opt-in with local_rtsp_only=1"
         		export device_var=""
         		export device_manufacturer="Unknown"
         		export device_model="Unknown Camera"
@@ -185,7 +186,7 @@ if [ -f "$sys_usr_bin/anyka_ipc" ]; then
 	        ;;
 	esac
 else
-	echo "Missing $sys_bin/anyka_ipc"
+	echo "Missing $sys_usr_bin/anyka_ipc"
 	exit 1
 fi
 
@@ -199,7 +200,7 @@ echo "Device has PTZ: $device_has_ptz"
 echo "Device resolution height: $device_height px"
 echo "Device resolution width: $device_width px"
 echo "Device can be used outdoor: $device_outdoor_use"
-echo "Device is fully supported: $device_supported"
+echo "Device profile recognized: $device_supported (does not imply an available binary patch)"
 echo "Anyka IPC Checksum: $anyka_md5"
 
 # Compare function
@@ -400,27 +401,36 @@ for i in 1 2 3 4 5 6 7; do
 done
 
 # Check, whether anyka_ipc exists
-if [ ! -e $sd_bin/anyka_ipc ]; then
+if [ ! -e "$sd_bin/anyka_ipc" ]; then
 	echo -n "Creating copy of firmwares anyka_ipc..." 
-	$cp $sys_usr_bin/anyka_ipc $sd_bin && echo "done" || echo "failed"
+	$rm -f "$sd_bin/anyka_ipc_patched"
+	$cp "$sys_usr_bin/anyka_ipc" "$sd_bin/anyka_ipc" && echo "done" || exit 1
 fi
-if [ -e $sd_bin/anyka_ipc ]; then
-	compare $sys_usr_bin/anyka_ipc $sd_bin/anyka_ipc || $cp $sys_usr_bin/anyka_ipc $sd_bin 
+if [ -e "$sd_bin/anyka_ipc" ]; then
+	if ! compare "$sys_usr_bin/anyka_ipc" "$sd_bin/anyka_ipc"; then
+		# A generated patch belongs to the old firmware, not the new stock copy.
+		$rm -f "$sd_bin/anyka_ipc_patched"
+		$cp "$sys_usr_bin/anyka_ipc" "$sd_bin/anyka_ipc" || exit 1
+	fi
 fi
 
 # Check, whether anyka_ipc_patched exists and if there are patches
-if [ ! -e $sd_bin/anyka_ipc_patched -a -e $sd_bin/anyka_ipc -a "$use_ipc_autopatcher" = "1" ]; then
-	anyka_checksum=`$md5sum -b $sd_bin/anyka_ipc | $awk '{print $1}'`
-	patch_file=`$find $sd_patch -type f -name "$anyka_checksum.ips.gz" | $awk '{print $1}'`
+if [ ! -e "$sd_bin/anyka_ipc_patched" -a -e "$sd_bin/anyka_ipc" -a "$use_ipc_autopatcher" = "1" -a "$local_rtsp_only" != "1" ]; then
+	anyka_checksum=`$md5sum -b "$sd_bin/anyka_ipc" | $awk '{print $1}'`
+	patch_file=`$find "$sd_patch" -type f -name "$anyka_checksum.ips.gz" | $head -n 1`
 	
-	if [ "$patch_file" != "" -a -f $patch_file ]; then
-		$touch $setup_lock_file
-		$sd_sbin/apply_ips_patch.sh $patch_file $sd_bin/anyka_ipc $sd_bin/anyka_ipc_patched
-		anyka_ipc_patched_checksum=`$md5sum $sd_bin/anyka_ipc_patched | $awk '{print $1}'`
-		patched_var="${device_var}_patched"
-		if [ -f "$sd_etc/anyka_checksums.conf" ]; then
-			$sed -i -e "s/^$patched_var=.*/$patched_var=$anyka_ipc_patched_checksum/g" "$sd_etc/anyka_checksums.conf"
-			. $sd_etc/anyka_checksums.conf
+	if [ -n "$patch_file" -a -f "$patch_file" ]; then
+		if "$busybox_hack" sh "$sd_sbin/apply_ips_patch.sh" "$patch_file" "$sd_bin/anyka_ipc" "$sd_bin/anyka_ipc_patched"; then
+			$touch "$setup_lock_file"
+			anyka_ipc_patched_checksum=`$md5sum "$sd_bin/anyka_ipc_patched" | $awk '{print $1}'`
+			patched_var="${device_var}_patched"
+			if [ -n "$device_var" -a -f "$sd_etc/anyka_checksums.conf" ]; then
+				$sed -i -e "s/^$patched_var=.*/$patched_var=$anyka_ipc_patched_checksum/g" "$sd_etc/anyka_checksums.conf"
+				. "$sd_etc/anyka_checksums.conf"
+			fi
+		else
+			echo "WARNING: Binary patch failed; keeping the stock anyka_ipc"
+			$rm -f "$sd_bin/anyka_ipc_patched"
 		fi
 	fi
 fi
@@ -443,7 +453,7 @@ if [ ! -e $sd_config/anyka_cfg.ini ]; then
 	echo -n "Creating anyka_cfg.ini from factory_cfg.ini file..."
 	$cp $sys_usr_local/factory_cfg.ini $sd_config/anyka_cfg.ini && echo "done" || echo "failed"
 fi
-if [ -e $sd_config/anyka_cfg.ini ]; then
+if [ -e "$sd_config/anyka_cfg.ini" ]; then
 	compare $sys_usr_local/factory_cfg.ini $sd_config/anyka_cfg.ini || $cp $sys_usr_local/factory_cfg.ini $sd_config/anyka_cfg.ini 
 fi
 
@@ -506,15 +516,16 @@ if [ -e $sd_lib/libavssdkbeta.so ]; then
 fi
 
 # Prepare and mount factory_cfg.ini
-if [ -e $sd_config/anyka_cfg.ini ]; then
+if [ -e "$sd_config/anyka_cfg.ini" ]; then
 	echo -n "Updating anyka_cfg.ini file..."
-	$sed -i -e 's/rtsp\ =\ 0/rtsp\ =\ 1/g' $sd_config/anyka_cfg.ini && \
-	$sed -i -e 's/onvif\ =\ 0/onvif\ =\ 1/g' $sd_config/anyka_cfg.ini && \
+	$sed -i -e 's/^[[:space:]]*rtsp[[:space:]]*=[[:space:]]*0\([[:space:]]*\([#;].*\)\{0,1\}\)$/rtsp = 1\1/' \
+		-e 's/^[[:space:]]*onvif[[:space:]]*=[[:space:]]*0\([[:space:]]*\([#;].*\)\{0,1\}\)$/onvif = 1\1/' \
+		"$sd_config/anyka_cfg.ini" && \
 	echo "done" || echo "failed"
 	echo -n "Binding anyka_cfg.ini from sd card to $sys_usr_local/factory_cfg.ini file..."
-	$mount --bind $sd_config/anyka_cfg.ini $sys_usr_local/factory_cfg.ini && echo "done" || echo "failed"
+	$mount --bind "$sd_config/anyka_cfg.ini" "$sys_usr_local/factory_cfg.ini" && echo "done" || echo "failed"
 	echo -n "Copying anyka_cfg.ini from sd card to $sys_config..."
-	$cp $sd_config/anyka_cfg.ini $sys_config/anyka_cfg.ini && echo "done" || echo "failed"
+	$cp "$sd_config/anyka_cfg.ini" "$sys_config/anyka_cfg.ini" && echo "done" || echo "failed"
 fi
 
 # Check, whether a backup of tuya dbs exists
@@ -553,92 +564,22 @@ fi
 # Create onvif.token file, if not exists
 [ -f "$sd_etc/onvif.token" ] || $dd if=/dev/urandom bs=1 count=32 2>/dev/null | $sha256sum | $awk '{print $1}' > $sd_etc/onvif.token
 
-# Construct the anyka ipc wrapper
+# Construct a small bootstrap; the runtime wrapper reloads configuration on each
+# firmware watchdog restart, including the optional custom configuration file.
 echo -n "Creating anyka_ipc_wrapper..."
-echo "#!/bin/sh" > $sys_temp/anyka_ipc_wrapper.sh
-echo "export hack=\"$sd_path/HACK\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export hack_conf=\"\$hack/etc/hack.conf\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export hack_custom_conf=\"\$hack/etc/hack_custom.conf\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export commands_conf=\"\$hack/etc/commands.conf\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export busybox_hack=\"$sd_bin/busybox\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export busybox_firmware=\"$sys_bin/busybox\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "[ -f \"$hack_conf\" ] && . $hack_conf || exit 1" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "[ -f \"$hack_custom_conf\" ] && . $hack_custom_conf || exit 1" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export busybox_hack=\"$sd_bin/busybox\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "[ -x \"$busybox_hack\" ] || exit 1" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export busybox_firmware=\"$sys_bin/busybox\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "[ -x \"$busybox_firmware\" ] || exit 1" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export busybox=\"$busybox_hack\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "[ -n \"$commands_conf\" ] && . $commands_conf || exit 1" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "export busybox=\"$busybox_hack\"" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "grep 'tilt_total_steps = 2200' $sys_temp/_ht_hw_settings.ini  || echo -e '\ntilt_total_steps = 2200' >> $sys_temp/_ht_hw_settings.ini" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "anyka_ipc_bin='$sd_bin/anyka_ipc'" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "if [ -x $sd_bin/anyka_ipc_patched ]; then" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  export LD_LIBRARY_PATH=/lib:/usr/lib:$sd_lib" >> $sys_temp/anyka_ipc_wrapper.sh
-if [ "$FORCE_STATE_LED_OFF" != "" -a "$FORCE_STATE_LED_OFF" != "0" ]; then
-	echo "  sleep $FORCE_STATE_LED_OFF && state_led.sh off &" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-if [ "$FORCE_AK39_FACTORY_ON_PATCHED" = "1" ]; then
-	echo "  touch /tmp/_ak39_factory.ini" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-echo "  anyka_ipc_bin='$sd_bin/anyka_ipc_patched'" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "elif [ -x $sd_patch/$anyka_md5/bin/anyka_ipc_patched ]; then" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  export LD_LIBRARY_PATH=/lib:/usr/lib:$sd_patch/$anyka_md5/lib" >> $sys_temp/anyka_ipc_wrapper.sh
-if [ "$FORCE_STATE_LED_OFF" != "" -a "$FORCE_STATE_LED_OFF" != "0" ]; then
-	echo " sleep $FORCE_STATE_LED_OFF && state_led.sh off &" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-if [  "$FORCE_AK39_FACTORY_ON_STATIC_PATCHED" = "1" ]; then
-	echo "  touch /tmp/_ak39_factory.ini" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-echo "  anyka_ipc_bin='$sd_patch/$anyka_md5/bin/anyka_ipc_patched'" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "elif [ -x $sd_patch/$anyka_md5/bin/anyka_ipc ]; then" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  export LD_LIBRARY_PATH=/lib:/usr/lib:$sd_patch/$anyka_md5/lib" >> $sys_temp/anyka_ipc_wrapper.sh
-if [ "$FORCE_STATE_LED_OFF" != "" -a "$FORCE_STATE_LED_OFF" != "0" ]; then
-	echo " sleep $FORCE_STATE_LED_OFF && state_led.sh off &" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-if [  "$FORCE_AK39_FACTORY_ON_STATIC" = "1" ]; then
-	echo "  touch /tmp/_ak39_factory.ini" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-echo "  anyka_ipc_bin='$sd_patch/$anyka_md5/bin/anyka_ipc'" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "else" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  export LD_LIBRARY_PATH=/lib:/usr/lib:$sd_lib" >> $sys_temp/anyka_ipc_wrapper.sh
-if [ "$FORCE_STATE_LED_OFF" != "" -a "$FORCE_STATE_LED_OFF" != "0" ]; then
-	echo " sleep $FORCE_STATE_LED_OFF && state_led.sh off &" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-if [  "$FORCE_AK39_FACTORY_ON_ORIGIN" = "1" ]; then
-	echo "  touch /tmp/_ak39_factory.ini" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-echo "fi" >> $sys_temp/anyka_ipc_wrapper.sh
-if [ "$local_rtsp_only" = "1" ]; then
-	echo "proc=\$($pgrep -f \"anyka_rtsp.sh\" || true)" >> $sys_temp/anyka_ipc_wrapper.sh
-	echo "if [ \"\$proc\" = \"\" ]; then" >> $sys_temp/anyka_ipc_wrapper.sh
-	echo "  $sd_sbin/anyka_rtsp.sh &" >> $sys_temp/anyka_ipc_wrapper.sh
-	echo "fi" >> $sys_temp/anyka_ipc_wrapper.sh
-fi
-echo "if [ -f \"/tmp/anyka_ipc.lock\" -o -f \"$setup_lock_file\" ]; then" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  sleep 60" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  exit 2" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "else" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  kill -KILL \`pidof \$anyka_ipc_bin\` >/dev/null 2>&1" >> $sys_temp/anyka_ipc_wrapper.sh
-#echo "  killall ipc_log_parser.sh >/dev/null 2>&1" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "fi" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "while [ -f \"/tmp/_ak39_startlock.ini\" ]; do" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "  sleep 3" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "done" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "# Issue #2 mitigation: Clean logseq* and log_seq_stat files before starting anyka_ipc" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "$rm -f /etc/config/logseq* /etc/config/log_seq_stat >/dev/null 2>&1 || true" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "echo \"\$anyka_ipc_bin\" > $sys_temp/anyka_ipc_wrapper.cmd" >> $sys_temp/anyka_ipc_wrapper.sh
-#echo "\$anyka_ipc_bin 2>&1 | $sd_sbin/ipc_log_parser.sh $ipc_log" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "\$anyka_ipc_bin" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "sleep 1" >> $sys_temp/anyka_ipc_wrapper.sh
-echo "done"
+{
+	echo '#!/bin/sh'
+	echo "export hack=\"$sd_path/HACK\""
+	echo "exec \"$busybox_hack\" sh \"$sd_sbin/anyka_ipc_wrapper.sh\" \"$anyka_md5\""
+} > "$sys_temp/anyka_ipc_wrapper.sh" && echo "done" || exit 1
 
 # Prepare anyka ipc wrapper and configuration
 echo -n "Enabling _ht_hw_settings.ini file..."
-$cp $sys_usr_local/_ht_hw_settings.ini $sys_temp && \
-$mount --bind $sys_temp/_ht_hw_settings.ini $sys_config/_ht_hw_settings.ini && \
+hardware_settings_source="$sys_config/_ht_hw_settings.ini"
+[ -f "$hardware_settings_source" ] || hardware_settings_source="$sys_usr_local/_ht_hw_settings.ini"
+$cp "$hardware_settings_source" "$sys_temp/_ht_hw_settings.ini.new" && \
+$mv "$sys_temp/_ht_hw_settings.ini.new" "$sys_temp/_ht_hw_settings.ini" && \
+$mount --bind "$sys_temp/_ht_hw_settings.ini" "$sys_config/_ht_hw_settings.ini" && \
 echo "done" || echo "failed"
 echo -n "Enabling anyka_ipc_wrapper..."
 $chmod +x $sys_temp/anyka_ipc_wrapper.sh && \
