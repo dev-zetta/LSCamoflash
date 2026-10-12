@@ -1,6 +1,12 @@
 # Projekt URLs
 PROJECT_URL := https://github.com/Bunkerschild/LSCamoflash
-DOWNLOAD_URL := $(PROJECT_URL)/raw/refs/heads/main/SOURCE/download/
+DOWNLOAD_URL := https://media.githubusercontent.com/media/Bunkerschild/LSCamoflash/main/SOURCE/download
+
+# Keep build phases ordered; individual packages compile in parallel.
+.NOTPARALLEL:
+.DEFAULT_GOAL := all
+JOBS ?= 8
+nproc ?= $(JOBS)
 
 # Optional packages
 WITH_RADARE2 := 0
@@ -22,7 +28,7 @@ ifeq ($(WITH_RADARE2), 1)
 	WITH_LIBEXECINFO = 1
 else
 	RADARE2_BUILD = without-radare2
-	RADARE2_CLEAN= = without-radare2-clean
+	RADARE2_CLEAN = without-radare2-clean
 endif
 ifeq ($(WITH_LIBEXECINFO), 1)
 	LIBEXECINFO_BUILD = libexecinfo
@@ -168,7 +174,7 @@ else ifeq ($(USE_LIBC), musl)
 	TOOLCHAIN_PATH := $(TOOLCHAIN_MUSL_PATH)
 endif
 PKG_CONFIG_PATH := $(TOOLCHAIN_PATH)/lib/pkgconfig:$(TOOLCHAIN_PATH)/share/pkgconfig
-PATH := $(HOST_DIR)/bin:$(TOOLCHAIN_PATH)/bin:$(TOOLCHAIN_UCLIBC_PATH)/bin:$(TOOLCHAIN_GLIBC_PATH)/bin:$(TOOLCHAIN_MUSL_PATH)/bin:$(PATH)
+PATH := $(HOST_DIR)/bin:$(PATH):$(TOOLCHAIN_PATH)/bin
 
 # GLIBC toolchain
 C_UCLIBC := $(TOOLCHAIN_UCLIBC_PATH)/bin/$(HOST_UCLIBC)-gcc
@@ -409,9 +415,13 @@ URLS := \
 # Ziele definieren
 all: download toolchain packages staging host build
 
+.PHONY: download
 download: $(DOWNLOAD_DIR) $(patsubst %,$(DOWNLOAD_DIR)/%,$(notdir $(URLS)))
+	@for archive in $(notdir $(URLS)); do \
+		$(SRC_DIR)/bin/download-file.sh "$(DOWNLOAD_URL)/$$archive" "$(DOWNLOAD_DIR)/$$archive" || exit 1; \
+	done
 
-$(TOOLCHAIN_UCLIBC_DIR)/buildroot.config: $(TOOLCHAIN_UCLIBC_DIR)
+$(TOOLCHAIN_UCLIBC_DIR)/buildroot.config: $(DOWNLOAD_DIR)/$(TOOLCHAIN_UCLIBC).tar.bz2 | download $(TOOLCHAIN_UCLIBC_DIR)
 	@echo "Extracting toolchain $(TOOLCHAIN_UCLIBC)"
 	@tar -xf $(DOWNLOAD_DIR)/$(TOOLCHAIN_UCLIBC).tar.bz2 -C $(TOOLCHAIN_UCLIBC_DIR) --strip-components=1
 	@cp /usr/bin/autom4te $(AUTOM4TE_UCLIBC)
@@ -423,7 +433,7 @@ $(TOOLCHAIN_UCLIBC_DIR)/buildroot.config: $(TOOLCHAIN_UCLIBC_DIR)
 	@cp /usr/bin/ifnames $(IFNAMES_UCLIBC)
 	@touch $@
 	
-$(TOOLCHAIN_GLIBC_DIR)/buildroot.config: $(TOOLCHAIN_GLIBC_DIR)
+$(TOOLCHAIN_GLIBC_DIR)/buildroot.config: $(DOWNLOAD_DIR)/$(TOOLCHAIN_GLIBC).tar.bz2 | download $(TOOLCHAIN_GLIBC_DIR)
 	@echo "Extracting toolchain $(TOOLCHAIN_GLIBC)"
 	@tar -xf $(DOWNLOAD_DIR)/$(TOOLCHAIN_GLIBC).tar.bz2 -C $(TOOLCHAIN_GLIBC_DIR) --strip-components=1
 	@cp /usr/bin/autom4te $(AUTOM4TE_GLIBC)
@@ -435,7 +445,7 @@ $(TOOLCHAIN_GLIBC_DIR)/buildroot.config: $(TOOLCHAIN_GLIBC_DIR)
 	@cp /usr/bin/ifnames $(IFNAMES_GLIBC)
 	@touch $@
 	
-$(TOOLCHAIN_MUSL_DIR)/buildroot.config: $(TOOLCHAIN_MUSL_DIR)
+$(TOOLCHAIN_MUSL_DIR)/buildroot.config: $(DOWNLOAD_DIR)/$(TOOLCHAIN_MUSL).tar.bz2 | download $(TOOLCHAIN_MUSL_DIR)
 	@echo "Extracting toolchain $(TOOLCHAIN_MUSL)"
 	@tar -xf $(DOWNLOAD_DIR)/$(TOOLCHAIN_MUSL).tar.bz2 -C $(TOOLCHAIN_MUSL_DIR) --strip-components=1
 	@cp /usr/bin/autom4te $(AUTOM4TE_MUSL)
@@ -455,12 +465,12 @@ toolchain-musl: $(TOOLCHAIN_MUSL_DIR)/buildroot.config
 
 toolchain: toolchain-uclibc toolchain-glibc toolchain-musl
 
-$(PACKAGES_DIR)/cacert.pem: $(PACKAGES_DIR)
-	@for file in $(DOWNLOAD_DIR)/*; do \
+$(PACKAGES_DIR)/cacert.pem: $(patsubst %,$(DOWNLOAD_DIR)/%,$(notdir $(URLS))) | download $(PACKAGES_DIR)
+	@for file in $(patsubst %,$(DOWNLOAD_DIR)/%,$(notdir $(URLS))); do \
 	  if [ "$$file" != "$(DOWNLOAD_DIR)/$(TOOLCHAIN_UCLIBC).tar.bz2" -a "$$file" != "$(DOWNLOAD_DIR)/$(TOOLCHAIN_GLIBC).tar.bz2" -a "$$file" != "$(DOWNLOAD_DIR)/$(TOOLCHAIN_MUSL).tar.bz2" -a "$$file" != "$(DOWNLOAD_DIR)/cacert.pem" ]; then \
 	  	cd $(PACKAGES_DIR); \
 	  	echo  "Extracting package $$file"; \
-	  	unzip -oqq $$file 2>/dev/null || tar -xf $$file -C $(PACKAGES_DIR) || echo "skipped"; \
+		unzip -oqq $$file 2>/dev/null || tar -xf $$file -C $(PACKAGES_DIR) || exit 1; \
 	  fi; \
 	done
 	@touch $@
@@ -486,15 +496,15 @@ $(STAGING_DIR):
 	@mkdir -p $@
 
 $(BUILD_DIR):
-	@make update-version-revision
 	@mkdir -p $@
 	
 $(HOST_DIR):
 	@mkdir -p $@
 
-$(DOWNLOAD_DIR)/%:
-	@echo "Downloading $(@F)..."
-	@wget -c -O $@ $(filter %$(@F),$(URLS))
+# Git clones without git-lfs contain pointer files instead of source archives.
+$(DOWNLOAD_DIR)/%: | $(DOWNLOAD_DIR)
+	@$(SRC_DIR)/bin/download-file.sh "$(DOWNLOAD_URL)/$(@F)" "$@"
+
 	
 $(PACKAGES_DIR)/$(LIBPCAP)/config.status:
 	@cd $(PACKAGES_DIR)/$(LIBPCAP); ./configure --host=$(HOST) CC=$(CC) --prefix=$(SDROOT) --sysconfdir=$(SDROOT)/etc/config --datarootdir=$(SDROOT)/usr/share
@@ -691,7 +701,7 @@ $(PACKAGES_DIR)/$(CJSON)/CMakeLists.txt.patch:
 
 $(PACKAGES_DIR)/$(CJSON)/build/Makefile: $(PACKAGES_DIR)/$(CJSON)/CMakeLists.txt.patch
 	@mkdir -p $(PACKAGES_DIR)/$(CJSON)/build
-	@cd $(PACKAGES_DIR)/$(CJSON)/build; cmake -DCMAKE_PREFIX_PATH=/ ..
+	@cd $(PACKAGES_DIR)/$(CJSON)/build; cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_PREFIX_PATH=/ ..
 
 $(PACKAGES_DIR)/$(CJSON)/build/libcjson.a: $(PACKAGES_DIR)/$(CJSON)/build/Makefile
 	@make -C $(PACKAGES_DIR)/$(CJSON)/build -j$(nproc)
@@ -716,7 +726,7 @@ $(PACKAGES_DIR)/$(MOSQUITTO)/build/Makefile: $(PACKAGES_DIR)/$(MOSQUITTO)/config
 	@mv $(PACKAGES_DIR)/$(MOSQUITTO)/man $(PACKAGES_DIR)/$(MOSQUITTO)/man.orig
 	@mkdir $(PACKAGES_DIR)/$(MOSQUITTO)/man
 	@touch $(PACKAGES_DIR)/$(MOSQUITTO)/man/CMakeLists.txt
-	@cd $(PACKAGES_DIR)/$(MOSQUITTO)/build; cmake .. -DCMAKE_INSTALL_PREFIX=/ -DWITH_STATIC_LIBRARIES=ON -DOPENSSL_ROOT_DIR=$(PACKAGES_DIR)/$(OPENSSL) -DBUILD_SHARED_LIBS=OFF -DWITH_DOCS=no -DWITH_DESTDIR=$(STAGING_DIR)/$(SDROOT)
+	@cd $(PACKAGES_DIR)/$(MOSQUITTO)/build; cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm .. -DCMAKE_INSTALL_PREFIX=/ -DWITH_STATIC_LIBRARIES=ON -DOPENSSL_ROOT_DIR=$(PACKAGES_DIR)/$(OPENSSL) -DBUILD_SHARED_LIBS=OFF -DWITH_DOCS=no -DWITH_DESTDIR=$(STAGING_DIR)/$(SDROOT)
 
 $(PACKAGES_DIR)/$(MOSQUITTO)/build/src/mosquitto: $(PACKAGES_DIR)/$(MOSQUITTO)/build/Makefile
 	@make -C $(PACKAGES_DIR)/$(MOSQUITTO)/build -j$(nproc)
@@ -753,7 +763,7 @@ mosquitto-clean:
 
 $(PACKAGES_DIR)/$(GSOAP)/config.status:
 	@cd $(PACKAGES_DIR)/$(GSOAP); ac_cv_func_malloc_0_nonnull=yes ./configure --host=$(HOST) --prefix=$(SDROOT) --sysconfdir=$(SDROOT)/etc/config --datarootdir=$(SDROOT)/usr/share --with-zlib=$(STAGING_DIR)/$(SDROOT) --with-openssl=$(STAGING_DIR)/$(SDROOT) LDFLAGS="-L$(STAGING_DIR)/$(SDROOT)/lib -lssl -lcrypto" CFLAGS="-I$(STAGING_DIR)/$(SDROOT)/include"
-	@echo -e "all:\n\ninstall:\n" > $(PACKAGES_DIR)/$(GSOAP)/gsoap/wsdl/Makefile
+	@printf 'all:\n\ninstall:\n' > $(PACKAGES_DIR)/$(GSOAP)/gsoap/wsdl/Makefile
 
 $(PACKAGES_DIR)/$(GSOAP)/gsoap/libgsoap.a: $(PACKAGES_DIR)/$(GSOAP)/config.status
 	@make -C $(PACKAGES_DIR)/$(GSOAP) -j$(nproc)
@@ -772,10 +782,10 @@ $(PACKAGES_DIR)/$(ONVIF)/CMakeLists.patch:
 
 $(PACKAGES_DIR)/$(ONVIF)/build/Makefile: $(PACKAGES_DIR)/$(ONVIF)/CMakeLists.patch
 	@mkdir -p $(PACKAGES_DIR)/$(ONVIF)/build
-	@cd $(PACKAGES_DIR)/$(ONVIF)/build; cmake ..
+	@cd $(PACKAGES_DIR)/$(ONVIF)/build; cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm ..
 
 $(PACKAGES_DIR)/$(ONVIF)/build/onvif_srvd: $(PACKAGES_DIR)/$(ONVIF)/build/Makefile
-	@cd $(PACKAGES_DIR)/$(ONVIF)/build; make
+	@$(MAKE) -C $(PACKAGES_DIR)/$(ONVIF)/build -j$(nproc)
 
 $(STAGING_DIR)/$(SDROOT)/sbin/onvif_srvd: $(PACKAGES_DIR)/$(ONVIF)/build/onvif_srvd
 	@mkdir -p $(STAGING_DIR)/$(SDROOT)/sbin/ || true
@@ -844,7 +854,7 @@ gmp-clean:
 
 $(PACKAGES_DIR)/$(LIBILBC)/build/Makefile:
 	@mkdir -p $(PACKAGES_DIR)/$(LIBILBC)/build
-	@cd $(PACKAGES_DIR)/$(LIBILBC)/build; cmake .. -DBUILD_SHARED_LIBS=on -DCMAKE_INSTALL_PREFIX=$(STAGING_DIR)/$(SDROOT)
+	@cd $(PACKAGES_DIR)/$(LIBILBC)/build; cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm .. -DBUILD_SHARED_LIBS=on -DCMAKE_INSTALL_PREFIX=$(STAGING_DIR)/$(SDROOT)
 		
 $(PACKAGES_DIR)/$(LIBILBC)/build/libilbc.pc: $(PACKAGES_DIR)/$(LIBILBC)/build/Makefile
 	@make -C $(PACKAGES_DIR)/$(LIBILBC)/build -j$(nproc)
@@ -861,7 +871,7 @@ libilbc-clean:
 
 $(PACKAGES_DIR)/$(OPENJPEG)/build/Makefile:
 	@mkdir -p $(PACKAGES_DIR)/$(OPENJPEG)/build
-	@cd $(PACKAGES_DIR)/$(OPENJPEG)/build; cmake .. -DCMAKE_INSTALL_PREFIX=$(STAGING_DIR)/$(SDROOT) -DBUILD_CODEC=OFF
+	@cd $(PACKAGES_DIR)/$(OPENJPEG)/build; cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm .. -DCMAKE_INSTALL_PREFIX=$(STAGING_DIR)/$(SDROOT) -DBUILD_CODEC=OFF
 	
 $(PACKAGES_DIR)/$(OPENJPEG)/libopenjp2.so: $(PACKAGES_DIR)/$(OPENJPEG)/build/Makefile
 	@make -C $(PACKAGES_DIR)/$(OPENJPEG)/build -j$(nproc)
@@ -1072,11 +1082,13 @@ $(STAGING_DIR)/$(SDROOT)/lib/libuClibc-1.0.34.so:
 	@cp -f $(STAGING_DIR)/$(SDROOT)/lib/libgcc_s.so.1 $(STAGING_DIR)/$(SDROOT)/lib/libgcc_s.so
 	@touch $@
 	
-staging: $(STAGING_DIR) libpcap tcpdump openssl zlib joe strace sqlite3 sqlcipher msmtp miniupnpc curl busybox cjson mosquitto gsoap onvif $(OPUS_BUILD) $(OPENJPEG_BUILD) $(LIBILBC_BUILD) $(LIBGPG_ERROR_BUILD) $(GMP_BUILD) $(LIBGCRYPT_BUILD) $(FFMPEG_BUILD) $(LIBEXECINFO_BUILD) $(PHP_BUILD) $(PYTHON_BUILD) $(KERNEL_BUILD) $(RADARE2_BUILD) $(GLIBC_BUILD) $(STAGING_DIR)/$(SDROOT)/lib/libuClibc-1.0.34.so
+staging: download toolchain packages $(STAGING_DIR) libpcap tcpdump openssl zlib joe strace sqlite3 sqlcipher msmtp miniupnpc curl busybox cjson mosquitto gsoap onvif $(OPUS_BUILD) $(OPENJPEG_BUILD) $(LIBILBC_BUILD) $(LIBGPG_ERROR_BUILD) $(GMP_BUILD) $(LIBGCRYPT_BUILD) $(FFMPEG_BUILD) $(LIBEXECINFO_BUILD) $(PHP_BUILD) $(PYTHON_BUILD) $(KERNEL_BUILD) $(RADARE2_BUILD) $(GLIBC_BUILD) $(STAGING_DIR)/$(SDROOT)/lib/libuClibc-1.0.34.so
 
 host: $(HOST_DIR)
 
-$(BUILD_DIR)/install.ps1: $(BUILD_DIR)
+SDCARD_FILES := $(shell find $(SRC_DIR)/sdcard -type f)
+
+$(BUILD_DIR)/install.ps1: $(SDCARD_FILES) $(SRC_DIR)/contrib/motor/motor.c $(SRC_DIR)/contrib/motor/Makefile | $(BUILD_DIR)
 	@cp -aL $(SRC_DIR)/sdcard/* $(BUILD_DIR) >/dev/null 2>&1 || true
 	@make -C $(SRC_DIR)/contrib/motor DESTDIR=$(BUILD_DIR)/mmcblk0p2/HACK install
 	@cp -aL $(STAGE_HACK)/lib/* $(BUILD_HACK)/lib >/dev/null 2>&1 || true
@@ -1250,16 +1262,16 @@ $(BUILD_HACK)/bin/r2pm:
 $(BUILD_HACK)/bin/rasm2:
 	@cp $(STAGE_HACK)/bin/rasm2 $@ >/dev/null 2>&1 || true
 
-$(BUILD_HACK)/etc/version.txt:
+$(BUILD_HACK)/etc/version.txt: $(ROOT_DIR)/version.txt | $(BUILD_DIR)/install.ps1
 	@cp $(ROOT_DIR)/version.txt $@ >/dev/null 2>&1 || true
 	@touch $@
 	
-$(BUILD_DIR)/LICENSE.md:
+$(BUILD_DIR)/LICENSE.md: | $(BUILD_DIR)
 	@cp $(ROOT_DIR)/LICENSE.MIT $(BUILD_DIR)/LICENSE.MIT
 	@cp $(ROOT_DIR)/LICENSE.md $@ 2>/dev/null || cp $(ROOT_DIR)/LICENSE.MIT $@
 	@touch $@
 
-build: $(BUILD_DIR)/install.ps1 $(BUILD_HACK)/bin/radare2 $(BUILD_HACK)/bin/r2agent $(BUILD_HACK)/bin/r2r $(BUILD_HACK)/bin/rasign2 $(BUILD_HACK)/bin/rax2 $(BUILD_HACK)/bin/ragg2 $(BUILD_HACK)/bin/rarun2 $(BUILD_HACK)/bin/rabin2 \
+build: staging host $(BUILD_DIR)/install.ps1 $(BUILD_HACK)/bin/radare2 $(BUILD_HACK)/bin/r2agent $(BUILD_HACK)/bin/r2r $(BUILD_HACK)/bin/rasign2 $(BUILD_HACK)/bin/rax2 $(BUILD_HACK)/bin/ragg2 $(BUILD_HACK)/bin/rarun2 $(BUILD_HACK)/bin/rabin2 \
        $(BUILD_HACK)/bin/radiff2 $(BUILD_HACK)/bin/ravc2 $(BUILD_HACK)/bin/rahash2 $(BUILD_HACK)/bin/rafind2 $(BUILD_HACK)/bin/r2pm $(BUILD_HACK)/bin/rasm2 $(BUILD_HACK)/bin/ffmpeg $(BUILD_HACK)/bin/ffprobe $(BUILD_HACK)/bin/opj_dump \
        $(BUILD_HACK)/bin/opj_compress $(BUILD_HACK)/bin/opj_decompress $(BUILD_HACK)/sbin/onvif_srvd $(BUILD_HACK)/bin/upnpc $(BUILD_HACK)/bin/tcpdump $(BUILD_HACK)/bin/strace-log-merge \
        $(BUILD_HACK)/bin/strace $(BUILD_HACK)/bin/sqlite3 $(BUILD_HACK)/bin/sqlcipher $(BUILD_HACK)/bin/pcap-config $(BUILD_HACK)/bin/openssl $(BUILD_HACK)/sbin/msmtpd $(BUILD_HACK)/bin/msmtp $(BUILD_HACK)/bin/joe \
@@ -1331,7 +1343,7 @@ build-test-glibc:
 	@make USE_LIBC=glibc WITH_GLIBC=1 WITH_FFMPEG=1 WITH_KERNEL=1 WITH_PHP=1 mrproper download toolchain packages staging host
 
 build-test-uclibc:
-	@make USE_LIBC=uclibc WITH_RADARE2=1 WITH_FFMPEG=1 WITH_KERNEL=1 WITH_PHP=1 WITH_PYTHON=1mrproper download toolchain packages staging host
+	@make USE_LIBC=uclibc WITH_RADARE2=1 WITH_FFMPEG=1 WITH_KERNEL=1 WITH_PHP=1 WITH_PYTHON=1 mrproper download toolchain packages staging host
 
 build-test-musl:
 	@make USE_LIBC=musl mrproper download toolchain packages staging host
