@@ -62,3 +62,8 @@ SOURCE/update-*.tgz
 
 # Docs autobuild
 docs/autobuild
+
+# Local validation tools and logs
+.local/
+__pycache__/
+*.pyc
