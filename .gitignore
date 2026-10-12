@@ -70,3 +70,6 @@ __pycache__/
 
 # Generated firmware backup kit (separate from runtime archives)
 SOURCE/backup-kit/
+
+# Generated exact-firmware RTSP callback helper
+SOURCE/src/contrib/rtsp-callback/libcamoflash_rtsp.so

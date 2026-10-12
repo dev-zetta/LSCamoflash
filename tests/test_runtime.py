@@ -33,7 +33,9 @@ class RuntimeTests(unittest.TestCase):
             "sd_path": self.base,
             "sd_bin": self.hack / "bin",
             "sd_sbin": self.hack / "sbin",
-            "sd_lib": self.hack / "lib",
+            # LD_PRELOAD tokenizes spaces even inside a quoted value; other
+            # fixture paths retain spaces to exercise ordinary shell quoting.
+            "sd_lib": Path(self.temp.name) / "preload-lib",
             "sd_patch": self.hack / "usr/patch",
             "sd_etc": self.hack / "etc",
             "sd_config": self.hack / "etc/config",
@@ -81,6 +83,10 @@ class RuntimeTests(unittest.TestCase):
             "export rm=rm\nexport touch=touch\nexport md5sum=md5sum\nexport awk=awk\nexport pidof=false\nexport kill=true\n"
         )
         self.stock = self.paths["sd_bin"] / "anyka_ipc"
+        # Shell launch fixtures inspect the environment only. Shared-loader
+        # behavior is covered by the separate compiled RTSP callback tests.
+        self.rtsp_hook = self.paths["sd_lib"] / "libcamoflash_rtsp.so"
+        self.rtsp_hook.write_text("non-executable shell-launch fixture\n")
         self.binary(self.stock, "stock")
         self.hardware = self.paths["sys_config"] / "_ht_hw_settings.ini"
         self.hardware.write_text("[config]\ntilt_total_steps = 1234\nmain_width = 2304\n")
@@ -95,6 +101,9 @@ class RuntimeTests(unittest.TestCase):
         self.write_executable(path, f'''#!/bin/sh
 printf '%s\\n' '{label}' > "$sys_temp/launched"
 printf '%s\\n' "$LD_LIBRARY_PATH" > "$sys_temp/library"
+printf '%s\\n' "$LD_PRELOAD" > "$sys_temp/preload"
+printf '%s\\n' "$LSCAMOFLASH_RTSP_PROFILE" > "$sys_temp/rtsp_profile"
+unset LD_PRELOAD LSCAMOFLASH_RTSP_PROFILE
 [ ! -f "$sys_temp/_ak39_factory.ini" ] || touch "$sys_temp/factory_at_launch"
 [ ! -f "$sys_temp/_ht_ap_mode.conf" ] || touch "$sys_temp/ap_at_launch"
 exit {status}
@@ -421,6 +430,52 @@ exit {status}
                 self.assertFalse((self.paths["sys_temp"] / "launched").exists())
                 self.assertFalse((self.paths["sys_temp"] / "_ak39_factory.ini").exists())
                 self.assertFalse((self.paths["sys_temp"] / "_ht_ap_mode.conf").exists())
+
+    def test_si_l25502_helper_is_scoped_to_local_stock_exec(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        for local in ("", "1"):
+            with self.subTest(local=local):
+                self.custom(f'export local_rtsp_only="{local}"\n')
+                result = self.wrapper(SI_L25502_MD5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((self.paths["sys_temp"] / "preload").read_text().strip(),
+                                 str(self.rtsp_hook) if local else "")
+                self.assertEqual((self.paths["sys_temp"] / "rtsp_profile").read_text().strip(),
+                                 "3007325.5" if local else "")
+
+    def test_si_l25502_local_mode_rejects_missing_empty_or_linked_helper(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        self.custom('export local_rtsp_only="1"\n')
+        for state in ("missing", "empty", "symlink"):
+            with self.subTest(state=state):
+                self.rtsp_hook.unlink(missing_ok=True)
+                if state == "empty":
+                    self.rtsp_hook.touch()
+                elif state == "symlink":
+                    self.rtsp_hook.symlink_to(self.stock)
+                result = self.wrapper(SI_L25502_MD5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("RTSP callback helper", result.stderr)
+                self.assertFalse((self.paths["sys_temp"] / "launched").exists())
+
+    def test_si_l25502_local_mode_rejects_preload_path_separators(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        for path in (self.hack / "lib", self.hack / "colon:lib"):
+            with self.subTest(path=path):
+                self.custom('export local_rtsp_only="1"\n' +
+                            f'export sd_lib={shlex.quote(str(path))}\n')
+                result = self.wrapper(SI_L25502_MD5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("Unsupported RTSP helper path", result.stderr)
+                self.assertFalse((self.paths["sys_temp"] / "launched").exists())
+
+    def test_legacy_factory_mode_does_not_require_or_load_exact_helper(self):
+        self.rtsp_hook.unlink()
+        self.custom('export local_rtsp_only="1"\n')
+        result = self.wrapper(CHECKSUM)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.paths["sys_temp"] / "preload").read_text().strip(), "")
+        self.assertEqual((self.paths["sys_temp"] / "rtsp_profile").read_text().strip(), "")
 
     def enable_wrapper_diagnostics(self):
         logs = self.hack / "var/log"

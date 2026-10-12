@@ -49,6 +49,7 @@ REQUIRED_ARCHIVE_FILES = {
     'mmcblk0p2/HACK/bin/php',
     'mmcblk0p2/HACK/sbin/onvif_srvd',
     'mmcblk0p2/HACK/sbin/anyka_ipc_wrapper.sh',
+    'mmcblk0p2/HACK/lib/libcamoflash_rtsp.so',
 }
 
 
@@ -129,6 +130,31 @@ def check_bootstrap(build, qemu):
     return {'static_arm_eabi5': True, 'arm926_checks': 2, 'native_rejection_exit': native.returncode}
 
 
+def check_rtsp_callback(hack, qemu):
+    """Load the packaged hook on ARM926; unrelated programs must stay untouched."""
+    helper = hack / 'lib/libcamoflash_rtsp.so'
+    if not helper.is_file() or not helper.stat().st_size:
+        raise ValueError('Missing exact-firmware RTSP callback helper')
+    checks = []
+    for profile in ('', '3007325.5'):
+        command = [qemu, '-cpu', 'arm926', '-L', str(hack),
+                   '-E', f'LD_LIBRARY_PATH={hack / "lib"}',
+                   '-E', f'LD_PRELOAD={helper}',
+                   '-E', f'LSCAMOFLASH_RTSP_PROFILE={profile}',
+                   str(hack / 'bin/php'), '-r',
+                   'usleep(1000); echo "rtsp-hook-unrelated-process-ok\\n";']
+        result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+        record = {'profile_requested': bool(profile), 'exit_code': result.returncode,
+                  'stdout': result.stdout, 'stderr': result.stderr}
+        checks.append(record)
+        if result.returncode != 0 or result.stdout.strip() != 'rtsp-hook-unrelated-process-ok':
+            raise RuntimeError(f'RTSP helper affected an unrelated ARM program: {record}')
+        if any(error in result.stderr.lower() for error in
+               ('error while loading', "can't load", 'undefined symbol', 'ignored')):
+            raise RuntimeError(f'RTSP helper failed to load: {record}')
+    return {'arm926_loader_checks': len(checks), 'checks': checks}
+
+
 def file_digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -203,12 +229,14 @@ def main():
     elfs = scan_elfs(build)
     runtime = run_runtime_checks(build / 'mmcblk0p2/HACK', args.qemu)
     bootstrap = check_bootstrap(build, args.qemu)
+    rtsp_callback = check_rtsp_callback(build / 'mmcblk0p2/HACK', args.qemu)
     archives = [
         check_archive(args.archive_dir / f'LSCamoflash-{version}-uclibc.tar.gz', False, build),
         check_archive(args.archive_dir / f'update-{version}-uclibc.tgz', True, build),
     ]
     summary = dict(source_files_verified=source_files, version_verified=True,
-                   elf_count=len(elfs), runtime_checks=len(runtime), bootstrap=bootstrap, archives=archives)
+                   elf_count=len(elfs), runtime_checks=len(runtime), bootstrap=bootstrap,
+                   rtsp_callback=rtsp_callback, archives=archives)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(dict(summary, elfs=elfs, runtime=runtime), indent=2) + '\n')

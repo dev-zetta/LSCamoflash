@@ -1113,6 +1113,10 @@ $(BUILD_DIR)/mmcblk0p1/hostapd: $(SRC_DIR)/contrib/bootstrap/hostapd.c $(BUILD_D
 $(BUILD_DIR)/mmcblk0p1/busybox: $(STAGE_HACK)/bin/busybox $(BUILD_DIR)/install.ps1
 	@cp $(STAGE_HACK)/bin/busybox $@
 
+# Exact-firmware local RTSP callbacks are supplied by a small process preload.
+$(BUILD_HACK)/lib/libcamoflash_rtsp.so: $(SRC_DIR)/contrib/rtsp-callback/rtsp_callback.c $(SRC_DIR)/contrib/rtsp-callback/Makefile $(BUILD_DIR)/install.ps1
+	@$(MAKE) -C $(SRC_DIR)/contrib/rtsp-callback CC="$(CC)" DESTDIR="$(BUILD_HACK)" install
+
 # Separate kit: its root boot markers must never be mixed with the runtime.
 .PHONY: backup-kit
 backup-kit: download toolchain packages $(STAGING_DIR) busybox
@@ -1290,7 +1294,7 @@ build: staging host $(BUILD_DIR)/install.ps1 $(BUILD_HACK)/bin/radare2 $(BUILD_H
        $(BUILD_HACK)/bin/strace $(BUILD_HACK)/bin/sqlite3 $(BUILD_HACK)/bin/sqlcipher $(BUILD_HACK)/bin/pcap-config $(BUILD_HACK)/bin/openssl $(BUILD_HACK)/sbin/msmtpd $(BUILD_HACK)/bin/msmtp $(BUILD_HACK)/bin/joe \
        $(BUILD_HACK)/bin/curl-config $(BUILD_HACK)/bin/curl $(BUILD_HACK)/bin/busybox $(BUILD_HACK)/bin/mosquitto_rr $(BUILD_HACK)/bin/mosquitto_pub $(BUILD_HACK)/bin/mosquitto_sub $(BUILD_HACK)/bin/mosquitto_passwd \
        $(BUILD_HACK)/sbin/mosquitto $(BUILD_HACK)/bin/php $(BUILD_HACK)/bin/php-cgi $(BUILD_HACK)/bin/phpize $(BUILD_HACK)/bin/python $(BUILD_HACK)/bin/pydoc \
-       $(BUILD_HACK)/bin/idle $(BUILD_HACK)/bin/pip $(BUILD_HACK)/etc/version.txt $(BUILD_DIR)/LICENSE.md $(BUILD_DIR)/mmcblk0p1/hostapd $(BUILD_DIR)/mmcblk0p1/busybox
+       $(BUILD_HACK)/bin/idle $(BUILD_HACK)/bin/pip $(BUILD_HACK)/etc/version.txt $(BUILD_DIR)/LICENSE.md $(BUILD_DIR)/mmcblk0p1/hostapd $(BUILD_DIR)/mmcblk0p1/busybox $(BUILD_HACK)/lib/libcamoflash_rtsp.so
 	
 build-clean:
 	@rm -rf $(BUILD_DIR)
