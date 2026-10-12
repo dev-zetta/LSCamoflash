@@ -101,10 +101,7 @@ jobs:
       run: |
         sudo apt update && sudo apt install -y build-essential flex bison gsoap binutils make automake autoconf autoconf-archive
         cd SOURCE
-        make mrproper-full download
-        make build-test-uclibc
-        make mrproper-phase1
-        make download-clean
+        make nproc=8 all
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3

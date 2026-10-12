@@ -1,6 +1,7 @@
 """Run changed shell blocks with fake network and motor commands only."""
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import tempfile
@@ -9,6 +10,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 HACK = ROOT / "SOURCE/src/sdcard/mmcblk0p2/HACK"
+
+
+def runtime_shell(default):
+    # CGI tests run in a temporary web root; resolve repo-relative emulators and
+    # BusyBox paths before changing the subprocess working directory.
+    return [str((ROOT / part).resolve()) if "/" in part and not part.startswith("-")
+            else part for part in shlex.split(os.environ.get("CAMOFLASH_RUNTIME_SHELL", default))]
 
 
 class NetworkTests(unittest.TestCase):
@@ -45,7 +53,7 @@ fi
                        sleep=str(sleep), sd_log=tmp, wifi_use_dhcp="1",
                        ifconfig="true", udhcpc=str(dhcp), cut="cut",
                        system_hostname="test.camera", sd_sbin=tmp)
-            result = subprocess.run(["sh", "-c", block], env=env,
+            result = subprocess.run([*runtime_shell("sh"), "-c", block], env=env,
                                     capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
             return events.read_text().splitlines()
@@ -78,7 +86,7 @@ class MotorTests(unittest.TestCase):
             (path / "common.cgi").write_text("parse_keyval() {" + functions)
             script = HACK / "var/www/cgi-bin/motor.cgi"
             env = dict(os.environ, QUERY_STRING=query, sd_sbin=tmp, device_has_ptz="1")
-            result = subprocess.run(["bash", str(script)], cwd=path, env=env,
+            result = subprocess.run([*runtime_shell("bash"), str(script)], cwd=path, env=env,
                                     capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("diagnostic", result.stdout)

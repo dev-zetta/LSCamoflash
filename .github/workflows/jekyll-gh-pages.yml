@@ -1,11 +1,7 @@
 name: Deploy Autobuild & GitHub Pages
 
 on:
-  push:
-    branches: 
-      - main
-    paths:
-      - 'SOURCE/**'
+  # Publishing is explicit in this fork; Build-Test produces reviewable archives.
   workflow_dispatch:
 
 permissions:

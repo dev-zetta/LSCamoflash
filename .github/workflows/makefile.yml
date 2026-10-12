@@ -1,41 +1,53 @@
 name: Build-Test
 
-permissions:
-  contents: write
-  pull-requests: write
-
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'SOURCE/**'
+    branches: [main]
+    paths: ['SOURCE/**', '.github/workflows/makefile.yml']
   pull_request:
-    branches:
-      - main
+    branches: [main]
+    paths: ['SOURCE/**', '.github/workflows/makefile.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 180
     steps:
-      - name: Repository auschecken
-        uses: actions/checkout@v4
-
-      - name: Installiere Build-Tools
-        run: sudo apt update && sudo apt install -y build-essential flex bison gsoap binutils make automake autoconf autoconf-archive
-
-      - name: Download der Quellen
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential flex bison gsoap binutils make automake autoconf autoconf-archive qemu-user
+      - name: Build default ARM uclibc packages and archives
+        shell: bash
         run: |
+          set -euo pipefail
+          mkdir -p .local/logs
           cd SOURCE
-          make mrproper-full download
-
-      - name: Starte Build-Test mit uclibc
+          make nproc=8 all release update 2>&1 | tee ../.local/logs/build.log
+      - name: Verify packaged ARM programs and archives
+        run: python3 SOURCE/src/bin/verify-build.py --output .local/logs/artifact-verification.json
+      - name: Run regressions with target BusyBox ash
+        env:
+          CAMOFLASH_RUNTIME_SHELL: qemu-arm SOURCE/build/mmcblk0p2/HACK/bin/busybox ash
         run: |
-          cd SOURCE
-          make build-test-uclibc
-
-      - name: Starte Build-Test mit gclibc
-        run: |
-          cd SOURCE
-          make build-test-glibc
+          python3 -m unittest discover -s tests -p test_runtime.py -v
+          python3 -m unittest discover -s tests -p test_network_motor.py -v
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            .local/logs/build.log
+            .local/logs/artifact-verification.json
+      - name: Upload firmware archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: LSCamoflash-uclibc
+          path: |
+            SOURCE/LSCamoflash-*-uclibc.tar.gz
+            SOURCE/update-*-uclibc.tgz
+          if-no-files-found: error

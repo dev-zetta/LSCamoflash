@@ -1,5 +1,7 @@
 # LSCamoflash
 
+Dieser Fork integriert die Upstream-PRs #5, #6, #8 und #9. Hinweise zu offenen Issues, lokalem RTSP und Tests stehen in den [Integrations- und Kompatibilitätsnotizen](docs/integration.md) (Englisch). Die folgenden Download-Links führen zu Upstream-Builds ohne die Änderungen dieses Forks.
+
 LSCamoflash ist ein modifiziertes Firmware-Paket für bestimmte IP-Kameras, das zusätzliche Funktionen und Verbesserungen bietet.
 
 - [LSCamoflash Github-Seite](https://bunkerschild.github.io/LSCamoflash/)
@@ -16,10 +18,10 @@ LSCamoflash ist ein modifiziertes Firmware-Paket für bestimmte IP-Kameras, das 
 [![Last commit](https://img.shields.io/github/last-commit/Bunkerschild/LSCamoflash.svg)](https://github.com/Bunkerschild/LSCamoflash/commits/main)
 [![Security Policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
 
-[![Build-Test](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/makefile.yml/badge.svg)](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/makefile.yml)
-[![Create Stable Release](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/release.yml/badge.svg)](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/release.yml)
-[![CodeQL Advanced](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/codeql.yml/badge.svg)](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/codeql.yml)
-[![Deploy GitHub Pages](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/jekyll-gh-pages.yml/badge.svg)](https://github.com/Bunkerschild/LSCamoflash/actions/workflows/jekyll-gh-pages.yml)
+[![Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml)
+[![Create Stable Release](https://github.com/dev-zetta/LSCamoflash/actions/workflows/release.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/release.yml)
+[![CodeQL Advanced](https://github.com/dev-zetta/LSCamoflash/actions/workflows/codeql.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/codeql.yml)
+[![Deploy GitHub Pages](https://github.com/dev-zetta/LSCamoflash/actions/workflows/jekyll-gh-pages.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/jekyll-gh-pages.yml)
 
 Sicherheitsprobleme sollten verantwortungsvoll gemeldet werden. Siehe SECURITY.md.
 
@@ -56,7 +58,7 @@ Bitte lesen Sie die [Verwendungsrichtlinie](SOURCE/USAGE_POLICY.md) für vollst�
 1. **Quellcode herunterladen:**
 
    ```bash
-   git clone https://github.com/Bunkerschild/LSCamoflash.git
+   git clone https://github.com/dev-zetta/LSCamoflash.git
    cd LSCamoflash/SOURCE
    ```
 

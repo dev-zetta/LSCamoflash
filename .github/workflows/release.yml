@@ -34,8 +34,7 @@ jobs:
           cp -v LSCamoflash-*-uclibc.tar.gz ../release/
           cp -v update-*-uclibc.tgz ../release/
 
-      # Note: `update-version.sh` is executed during `make release`.
-      # We only need to commit the resulting SOURCE/version.txt here.
+      # Version changes are explicit; make all/release do not mutate version.txt.
 
       - name: Commit and push updated SOURCE/version.txt
         shell: bash
