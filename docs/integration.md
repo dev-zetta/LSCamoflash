@@ -159,3 +159,20 @@ The following development artifacts replace the earlier hashes above, with the e
 | --- | ---: | --- |
 | `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,194,956 | `633d6d5e9bd04742dc321284c2248957073c015eb5fa6f839c80de720899ab38` |
 | `update-1.03.2412-uclibc.tgz` | 45,768,985 | `b068a4d41b50ce9f298ab5057c3ddc041903028e0319f1d49bc9585c896c8785` |
+
+## Normal-mode acceptance, memory reporting and local streaming setup
+
+The fourth physical boot accepted the stock network-tool correction: `wlan0` remained present, WPA reached `COMPLETED`, the camera acquired `192.168.88.12` and a default route, and the user confirmed web UI login on port 8080. This establishes normal-mode network and web UI operation for this card. The user then selected a switch to local RTSP/ONVIF mode after being told that it replaces Tuya app mode. Its explicit Wi-Fi override was prepared privately from validated paired-network evidence; no credentials, camera logs, account database or proprietary firmware enter the repository or archives. A new cold boot and actual streaming tests remain necessary.
+
+The old RAM bar calculated total minus `MemFree`, so cache contributed to its reported roughly 90% use. The UI now uses the kernel's `MemAvailable` estimate, distinguishes a genuine zero from a missing counter, labels the free-memory fallback, and exposes overlapping cache/buffer/shared-memory details. The status API retains its existing memory fields and adds counter-presence and breakdown fields. Opt-in handoff samples now retain selected numeric `/proc/meminfo` counters and process resident/virtual memory and thread counts, with the existing five sample times and 64-process limit. No actual RAM pressure or memory reduction is inferred from the old bar; the next camera boot must establish headroom.
+
+The local-stream error now explains this exact firmware's mode switch, Wi-Fi requirement and Tuya tradeoff. ONVIF link generation returns the bundled server's advertised root HTTP service address, `http://<camera-ip>:5000/`, rather than a custom `onvif://` display URI. Main RTSP remains port 88 `/videoMain` with H.265; sub RTSP remains port 89 `/videoSub` with H.264, which the bundled ONVIF server advertises after its listener starts. A generated URL does not prove a listening service, decoded frames or discovery, and DHCP may change the address.
+
+Final local checks on 2026-10-12 all exited zero: the host suite ran 309 cases in 30.614 seconds (273 executed, 36 optional ARM cases skipped), and the suite configured for ARM926 runtime and backup checks passed all 309 in 86.875 seconds without skips. New fixtures exercise the actual system-info UI callback with available, missing, zero and invalid memory counters, target BusyBox parsing and bounded/redacted memory observations, the explanatory mode error, and the ONVIF HTTP endpoint. The default build, backup kit and both runtime archives succeeded. Artifact checks verified 146 source files, 119 ELF32 ARM files, 23 packaged program checks, two early-bootstrap ARM926 checks and every regular archive file against the build. These checks do not establish local-mode physical acceptance.
+
+The replacement development artifacts below keep the upstream version number. No stable release was published.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,195,690 | `285ef802d5b34f4e2c53931ca24fd23bef800d169f02a59e946852ca86b71047` |
+| `update-1.03.2412-uclibc.tgz` | 45,769,587 | `74622c0d917768d5f7a6f54226ba3bb50159702f70a5e3556d8bcea7fdf9fc89` |

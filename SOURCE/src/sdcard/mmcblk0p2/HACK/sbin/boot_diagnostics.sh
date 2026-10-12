@@ -25,6 +25,18 @@ fi
 : > "$log_file" || exit 0
 exec >> "$log_file" 2>/dev/null
 
+sample_memory()
+{
+	# Keep the kernel's KiB counters, including cache/shared memory, so a host
+	# can assess RAM pressure without inferring it from MemFree alone.
+	tool awk '
+		NF == 3 && $1 ~ /^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SReclaimable|Shmem|SwapTotal|SwapFree):$/ &&
+		$2 ~ /^[0-9]+$/ && length($2) <= 20 && $3 == "kB" && !seen[$1]++ {
+			key=$1; sub(/:$/, "", key)
+			printf "memory %s_kB=%s\n",key,$2
+		}' "$proc_root/meminfo"
+}
+
 sample_processes()
 {
 	process_count=0
@@ -33,12 +45,25 @@ sample_processes()
 		case "$process_pid" in ''|*[!0-9]*) continue ;; esac
 		IFS= read -r process_comm < "$process_dir/comm" || continue
 		case "$process_comm" in
-			anyka_ipc|anyka_ipc_patched|anyka_ipc_patch|daemon|wpa_supplicant|udhcpc) ;;
+			anyka_ipc|anyka_ipc_patched|anyka_ipc_patch|daemon|wpa_supplicant|udhcpc|php|php-cgi|php-fpm|ffmpeg|mosquitto|busybox) ;;
 			*) continue ;;
 		esac
-		process_ppid=$(tool awk '$1 == "PPid:" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$process_dir/status")
-		case "$process_ppid" in ''|*[!0-9]*) continue ;; esac
-		printf 'process pid=%s ppid=%s comm=%s\n' "$process_pid" "$process_ppid" "$process_comm"
+		process_status=$(tool awk '
+			NF == 2 && $1 == "PPid:" && $2 ~ /^[0-9]+$/ && length($2) <= 10 && !seen[$1]++ { ppid=$2 }
+			NF == 3 && ($1 == "VmRSS:" || $1 == "VmSize:") && $2 ~ /^[0-9]+$/ &&
+			length($2) <= 20 && $3 == "kB" && !seen[$1]++ { memory[$1]=$2 }
+			NF == 2 && $1 == "Threads:" && $2 ~ /^[0-9]+$/ && length($2) <= 10 &&
+			$2+0 > 0 && !seen[$1]++ { threads=$2 }
+			END {
+				if (!seen["PPid:"]) exit
+				printf "ppid=%s",ppid
+				if (seen["VmRSS:"]) printf " VmRSS_kB=%s",memory["VmRSS:"]
+				if (seen["VmSize:"]) printf " VmSize_kB=%s",memory["VmSize:"]
+				if (seen["Threads:"]) printf " Threads=%s",threads
+				printf "\n"
+			}' "$process_dir/status")
+		[ -n "$process_status" ] || continue
+		printf 'process pid=%s %s comm=%s\n' "$process_pid" "$process_status" "$process_comm"
 		process_count=$((process_count + 1))
 		[ "$process_count" -lt 64 ] || break
 	done
@@ -101,6 +126,7 @@ for interval in 0 5 10 15 30; do
 	uptime_value=$(tool awk '$1 ~ /^[0-9]+([.][0-9]+)?$/ { print $1; exit }' "$proc_root/uptime")
 	printf '\nsample nominal_seconds=%s uptime=%s\n' "$elapsed" "${uptime_value:-unavailable}"
 	sample_handoff_state
+	sample_memory
 	sample_processes
 	sample_network
 done

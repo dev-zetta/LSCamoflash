@@ -96,7 +96,12 @@ class StreamTests(unittest.TestCase):
     def test_onvif_url_uses_configured_port(self):
         result, body = self.cgi(profile={"port_onvif": "6001"}, query="type=onvif&source=local")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(body["url"], "onvif://192.0.2.8:6001/")
+        self.assertEqual(body["url"], "http://192.0.2.8:6001/")
+
+    def test_exact_onvif_link_is_the_bundled_servers_http_endpoint(self):
+        result, body = self.cgi(profile=EXACT, query="type=onvif&source=local")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(body, {"url": "http://192.0.2.8:5000/", "type": "ONVIF", "source": "LOCAL"})
 
     def test_normal_tuya_exact_profile_does_not_claim_rtsp(self):
         profile = dict(EXACT, device_rtsp_available="0")
@@ -112,6 +117,17 @@ class StreamTests(unittest.TestCase):
         result, body = self.cgi(ip="")
         self.assertEqual(result.returncode, 1)
         self.assertIn("No local IPv4", body["error"])
+
+    def test_exact_normal_mode_explains_streaming_mode_change(self):
+        profile = dict(EXACT, device_rtsp_available="0",
+                       anyka_md5="7c2a124cdd607ebef63fb66d063b6a87")
+        for stream_type in ("rtsp", "onvif"):
+            with self.subTest(stream_type=stream_type):
+                result, body = self.cgi(profile=profile, query=f"type={stream_type}&source=local")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Status: 503", result.stdout)
+                self.assertIn("Configure Wi-Fi for Local RTSP mode", body["error"])
+                self.assertIn("replaces Tuya app access", body["error"])
 
     def test_invalid_profile_cannot_break_json(self):
         for profile in ({"device_rtsp_main_path": '/bad"path'}, {"device_rtsp_main_port": "70000"}):

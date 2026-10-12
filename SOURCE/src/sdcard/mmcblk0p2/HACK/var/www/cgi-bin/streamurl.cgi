@@ -29,7 +29,12 @@ valid_endpoint()
 }
 
 if [ "$STREAM_SOURCE" = "LOCAL" -o "$STREAM_SOURCE" = "local" ]; then
-    [ "${device_rtsp_available:-1}" = "1" ] || stream_error "503 Service unavailable" "Local RTSP is not enabled for this firmware mode"
+    if [ "${device_rtsp_available:-1}" != "1" ]; then
+        if [ "$anyka_md5" = "7c2a124cdd607ebef63fb66d063b6a87" ]; then
+            stream_error "503 Service unavailable" "Local streaming is not enabled in Tuya mode. Configure Wi-Fi for Local RTSP mode and restart the camera. This replaces Tuya app access."
+        fi
+        stream_error "503 Service unavailable" "Local RTSP is not enabled for this firmware mode"
+    fi
     IP_ADDR=$(ip -4 addr show wlan0 | awk '$1 == "inet" {split($2,a,"/"); print a[1]; exit}')
     case "$IP_ADDR" in ''|*[!0-9.]*) stream_error "503 Service unavailable" "No local IPv4 address";; esac
     STREAM_SOURCE="LOCAL"
@@ -45,7 +50,7 @@ if [ "$STREAM_SOURCE" = "LOCAL" -o "$STREAM_SOURCE" = "local" ]; then
             STREAM_TYPE=ONVIF
             onvif_port=${port_onvif:-5000}
             valid_endpoint "$onvif_port" / || stream_error "503 Service unavailable" "Invalid ONVIF profile"
-            STREAM_ADDR="onvif://$IP_ADDR:$onvif_port/"
+            STREAM_ADDR="http://$IP_ADDR:$onvif_port/"
             ;;
         *)
             stream_error "400 Bad request" "Invalid local stream type"

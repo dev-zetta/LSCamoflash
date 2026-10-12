@@ -28,7 +28,8 @@ class SysinfoTests(unittest.TestCase):
             path = Path(temporary)
             counters = {
                 "mounts": mounts,
-                "meminfo": "MemTotal: 65536 kB\nMemFree: 12000 kB\nMemAvailable: 16000 kB\n",
+                "meminfo": "MemTotal: 65536 kB\nMemFree: 12000 kB\nMemAvailable: 16000 kB\n"
+                           "Buffers: 1000 kB\nCached: 2000 kB\nSReclaimable: 3000 kB\nShmem: 4000 kB\n",
                 "cpuinfo": "processor : 0\nProcessor : ARM926EJ-S rev 5 (v5l)\n",
                 "uptime": "90061.25 12.0\n", "loadavg": "0.15 1.25 2.50 1/12 1\n",
                 "stat": "cpu 100 0 100 800\n",
@@ -189,7 +190,10 @@ else: sys.exit(2)
     def test_kernel_counters_and_arm_processor_name(self):
         body, _ = self.run_fixture()
         self.assertEqual(body["cpu"], {"model": "ARM926EJ-S rev 5 (v5l)", "cores": 1, "usage_percent": 30})
-        self.assertEqual(body["memory"], {"total_kB": 65536, "free_kB": 12000, "available_kB": 16000})
+        self.assertEqual(body["memory"], {
+            "total_kB": 65536, "free_kB": 12000, "available_kB": 16000,
+            "available_reported": True, "buffers_kB": 1000, "cached_kB": 2000,
+            "reclaimable_kB": 3000, "shared_kB": 4000})
         self.assertEqual(body["uptime"]["seconds"], 90061)
         self.assertEqual(body["load"], {"min1": .15, "min5": 1.25, "min15": 2.5})
 
@@ -198,7 +202,10 @@ else: sys.exit(2)
             "meminfo": "MemTotal: bad kB\nMemFree: -1 kB\nMemAvailable: 99999999999999999 kB\n",
             "cpuinfo": "", "uptime": "", "loadavg": "NaN -2 infinity\n",
             "stat": "cpu bad 0 1 2\n", "stat_after": "cpu 1 0 0 1\n"})
-        self.assertEqual(body["memory"], {"total_kB": 0, "free_kB": 0, "available_kB": 0})
+        self.assertEqual(body["memory"], {
+            "total_kB": 0, "free_kB": 0, "available_kB": 0,
+            "available_reported": False, "buffers_kB": 0, "cached_kB": 0,
+            "reclaimable_kB": 0, "shared_kB": 0})
         self.assertEqual(body["load"], {"min1": 0, "min5": 0, "min15": 0})
         self.assertEqual(body["cpu"]["usage_percent"], 0)
         self.assertEqual(body["uptime"]["seconds"], 0)
@@ -206,6 +213,22 @@ else: sys.exit(2)
     def test_cpu_model_json_escaping(self):
         body, _ = self.run_fixture(metrics={"cpuinfo": 'processor : 0\nmodel name : ARM "fixture" \\ chip\tname\n'})
         self.assertEqual(body["cpu"]["model"], 'ARM "fixture" \\ chipname')
+
+    def test_missing_available_counter_differs_from_real_zero(self):
+        for suffix, reported in (("", False), ("MemAvailable: 0 kB\n", True)):
+            with self.subTest(reported=reported):
+                body, _ = self.run_fixture(metrics={
+                    "meminfo": "MemTotal: 65536 kB\nMemFree: 4096 kB\n" + suffix})
+                self.assertEqual(body["memory"]["available_kB"], 0)
+                self.assertEqual(body["memory"]["available_reported"], reported)
+
+    def test_invalid_cache_counters_remain_numeric_zero(self):
+        body, _ = self.run_fixture(metrics={
+            "meminfo": "MemTotal: 65536 kB\nMemAvailable: 16000 kB\n"
+                       "Buffers: -1 kB\nCached: NaN kB\nSReclaimable: bad kB\n"
+                       "Shmem: 99999999999999999 kB\n"})
+        for name in ("buffers_kB", "cached_kB", "reclaimable_kB", "shared_kB"):
+            self.assertEqual(body["memory"][name], 0)
 
 
 if __name__ == "__main__":

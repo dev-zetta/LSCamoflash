@@ -169,9 +169,28 @@ function getSysinfo() {
         dataType: "json",
         success: function(data) {            
             let cpuUsage = data.cpu.usage_percent;
-            let ramUsed = (data.memory.total_kB - data.memory.free_kB);
-            let ramTotal = data.memory.total_kB;
-            let ramPercent = Math.round((ramUsed / ramTotal) * 100);
+            let memory = data.memory || {};
+            const validMemoryCounter = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
+            let ramTotal = validMemoryCounter(memory.total_kB) ? memory.total_kB : 0;
+            // MemAvailable accounts for reclaimable memory. Free alone also
+            // counts filesystem cache as occupied, so label that fallback.
+            let ramHasAvailable = memory.available_reported !== false && validMemoryCounter(memory.available_kB);
+            let ramKnown = ramTotal > 0 && (ramHasAvailable || validMemoryCounter(memory.free_kB));
+            let ramAvailable = ramHasAvailable ? memory.available_kB : (validMemoryCounter(memory.free_kB) ? memory.free_kB : 0);
+            ramAvailable = Math.min(ramTotal, ramAvailable);
+            let ramUsed = ramTotal - ramAvailable;
+            let ramPercent = ramKnown ? Math.round((ramUsed / ramTotal) * 100) : 0;
+            const memoryMiB = value => Math.round((validMemoryCounter(value) ? value : 0) / 1024);
+            let ramLabel = "RAM: unavailable";
+            if (ramKnown) {
+                ramLabel = "RAM: " + (ramHasAvailable ? "used " : "occupied ") + memoryMiB(ramUsed) +
+                    " MiB / " + memoryMiB(ramTotal) + " MiB (" +
+                    (ramHasAvailable ? memoryMiB(ramAvailable) + " MiB available" : "free-memory fallback") + ")";
+            }
+            let ramDetails = "Free: " + memoryMiB(memory.free_kB) + " MiB; cache (includes shared memory): " +
+                memoryMiB(memory.cached_kB) + " MiB; buffers: " + memoryMiB(memory.buffers_kB) +
+                " MiB; reclaimable slab: " + memoryMiB(memory.reclaimable_kB) +
+                " MiB; shared/tmpfs: " + memoryMiB(memory.shared_kB) + " MiB. These counters overlap.";
             let load1Min = data.load.min1;
             let load5Min = data.load.min5;
             let load15Min = data.load.min15;
@@ -191,8 +210,8 @@ function getSysinfo() {
             $("#cpu-label").text("CPU: load " + load1Min + ", " + load5Min + ", " + load15Min);
 
             $("#ram-progress").progressbar("value", ramPercent);
-            $("#ram-percent").text(ramPercent);
-            $("#ram-label").text("RAM: used " + Math.round(ramUsed / 1024) + "MB / " + Math.round(ramTotal / 1024) + "MB");
+            $("#ram-percent").text(ramKnown ? ramPercent : "-");
+            $("#ram-label").text(ramLabel).attr("title", ramKnown ? ramDetails : "Memory counters unavailable");
             
             $("#sd-percent").text(sdCardUsedPercent);
             $("#sd-size").text(Math.ceil(sdCardSize / 1000 / 1000 / 1000) + " GB");

@@ -67,7 +67,13 @@ device_used()
 
 MEM_TOTAL=$(uint "$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null)")
 MEM_FREE=$(uint "$(awk '/^MemFree:/ {print $2; exit}' /proc/meminfo 2>/dev/null)")
-MEM_AVAILABLE=$(uint "$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo 2>/dev/null)")
+MEM_AVAILABLE_RAW=$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo 2>/dev/null)
+MEM_AVAILABLE=$(uint "$MEM_AVAILABLE_RAW")
+MEM_AVAILABLE_REPORTED=$(awk -v value="$MEM_AVAILABLE_RAW" 'BEGIN {print (value ~ /^[0-9]+$/ && value+0 <= 9007199254740991) ? "true" : "false"}')
+MEM_BUFFERS=$(uint "$(awk '/^Buffers:/ {print $2; exit}' /proc/meminfo 2>/dev/null)")
+MEM_CACHED=$(uint "$(awk '/^Cached:/ {print $2; exit}' /proc/meminfo 2>/dev/null)")
+MEM_RECLAIMABLE=$(uint "$(awk '/^SReclaimable:/ {print $2; exit}' /proc/meminfo 2>/dev/null)")
+MEM_SHARED=$(uint "$(awk '/^Shmem:/ {print $2; exit}' /proc/meminfo 2>/dev/null)")
 CPU_MODEL=$(awk -F':[[:space:]]*' '/^(model name|Processor)[[:space:]]*:/ {print $2; exit}' /proc/cpuinfo 2>/dev/null)
 CPU_CORES=$(uint "$(awk '/^processor[[:space:]]*:/ {count++} END {print count+0}' /proc/cpuinfo 2>/dev/null)")
 UPTIME_SECONDS=$(uint "$(awk '{printf "%.0f", int($1); exit}' /proc/uptime 2>/dev/null)")
@@ -116,7 +122,12 @@ cat <<EOF
   "memory": {
     "total_kB": $MEM_TOTAL,
     "free_kB": $MEM_FREE,
-    "available_kB": $MEM_AVAILABLE
+    "available_kB": $MEM_AVAILABLE,
+    "available_reported": $MEM_AVAILABLE_REPORTED,
+    "buffers_kB": $MEM_BUFFERS,
+    "cached_kB": $MEM_CACHED,
+    "reclaimable_kB": $MEM_RECLAIMABLE,
+    "shared_kB": $MEM_SHARED
   },
   "cpu": {
     "model": "$(printf '%s' "$CPU_MODEL" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g')",

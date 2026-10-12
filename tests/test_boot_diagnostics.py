@@ -30,6 +30,11 @@ class BootDiagnosticsTests(unittest.TestCase):
         self.proc = self.base / "proc"
         self.proc.mkdir()
         (self.proc / "uptime").write_text("123.45 321.00\n")
+        (self.proc / "meminfo").write_text(
+            "MemTotal: 65536 kB\nMemFree: 1024 kB\nMemAvailable: 16384 kB\n"
+            "Buffers: 128 kB\nCached: 8192 kB\nSReclaimable: 256 kB\n"
+            "Shmem: 4096 kB\nSwapTotal: 65532 kB\nSwapFree: 60000 kB\n"
+            "PrivateField: PRIVATE_MEMORY\n")
         (self.proc / "mounts").write_text(
             "tmpfs /mnt tmpfs rw,relatime 0 0\n"
             "/dev/mmcblk0 /mnt vfat rw,uid=0 0 0\n"
@@ -69,11 +74,12 @@ class BootDiagnosticsTests(unittest.TestCase):
         self.process(24, "anyka_ipc_patch", 20)
         self.process(25, "PRIVATE_PROCESS", 20)
 
-    def process(self, pid, name, ppid):
+    def process(self, pid, name, ppid, status_extra=""):
         path = self.proc / str(pid)
         path.mkdir()
         (path / "comm").write_text(name + "\n")
-        (path / "status").write_text(f"Name:\t{name}\nPid:\t{pid}\nPPid:\t{ppid}\nSecret:\tPRIVATE_STATUS\n")
+        (path / "status").write_text(
+            f"Name:\t{name}\nPid:\t{pid}\nPPid:\t{ppid}\nSecret:\tPRIVATE_STATUS\n" + status_extra)
         (path / "cmdline").write_bytes(b"PRIVATE_ARGV\0PRIVATE_PASSWORD\0")
 
     def run_helper(self):
@@ -94,10 +100,19 @@ class BootDiagnosticsTests(unittest.TestCase):
                 -iwlan0) [ "$7" = status ] || exit 92; [ "$LD_LIBRARY_PATH" = /lib:/usr/lib ] || exit 95; command cat "$FIXTURE/wpa-output" ;;
                 *) exit 93 ;;
             esac ;;
-        awk|mv) command "$@" ;;
+        awk) FIXTURE_AWK "$@" ;;
+        mv) command "$@" ;;
         *) exit 94 ;;
     esac
 }'''
+        # Run the production parsers with the selected ARM BusyBox too. The
+        # network outputs and all waits remain fixtures under either runtime.
+        runtime = shell()
+        if len(runtime) > 1 and runtime[-1] in ("sh", "ash"):
+            awk_runtime = shlex.join(runtime[:-1])
+        else:
+            awk_runtime = shlex.quote(shutil.which("busybox")) if shutil.which("busybox") else "command"
+        stub = stub.replace("FIXTURE_AWK", awk_runtime)
         self.assertEqual(text.count('tool() { "$busybox_hack" "$@"; }'), 1)
         text = text.replace('tool() { "$busybox_hack" "$@"; }', stub)
         copied = self.base / "diagnostics.sh"
@@ -166,7 +181,85 @@ class BootDiagnosticsTests(unittest.TestCase):
         self.assertIn("uptime=unavailable", output)
         self.assertIn("wlan0 operstate=unavailable", output)
         self.assertIn("wpa_status=unavailable", output)
+        self.assertNotIn("memory ", output)
         self.assertIn("handoff samples complete", output)
+
+    def test_memory_counters_and_service_footprints_are_reported_each_sample(self):
+        values = {"MemTotal": 65536, "MemFree": 1024, "MemAvailable": 16384,
+                  "Buffers": 128, "Cached": 8192, "SReclaimable": 256,
+                  "Shmem": 4096, "SwapTotal": 65532, "SwapFree": 60000}
+        services = ("php", "php-cgi", "php-fpm", "ffmpeg", "mosquitto", "busybox")
+        for pid, name in enumerate(services, 30):
+            self.process(pid, name, 10,
+                         "VmRSS:\t1536 kB\nVmSize:\t4096 kB\nThreads:\t2\n"
+                         "VmSwap:\tPRIVATE_SWAP kB\n")
+        _, output = self.run_helper()
+        for key, value in values.items():
+            self.assertEqual(output.count(f"memory {key}_kB={value}\n"), 5)
+        for pid, name in enumerate(services, 30):
+            line = f"process pid={pid} ppid=10 VmRSS_kB=1536 VmSize_kB=4096 Threads=2 comm={name}\n"
+            self.assertEqual(output.count(line), 5)
+        self.assertNotIn("PRIVATE", output)
+        self.assertNotIn("VmSwap", output)
+
+    def test_memory_filter_rejects_invalid_units_values_and_duplicates(self):
+        (self.proc / "meminfo").write_text(
+            "MemTotal: 65536 kB\nMemTotal: 999 kB\nMemFree: -1 kB\n"
+            "MemAvailable: 1.5 kB\nBuffers: 128 MB\nCached: 8192 KB\n"
+            "SReclaimable: 256 kB PRIVATE_TRAILING\nShmem: PRIVATE_MEMORY kB\n"
+            "SwapTotal: 999999999999999999999 kB\nSwapFree: 0 kB\n"
+            "PrivateField: 42 kB\n")
+        _, output = self.run_helper()
+        self.assertEqual(output.count("memory MemTotal_kB=65536\n"), 5)
+        self.assertEqual(output.count("memory SwapFree_kB=0\n"), 5)
+        self.assertEqual(output.count("memory "), 10)
+        self.assertNotIn("PRIVATE", output)
+        self.assertNotIn("=999", output)
+
+    def test_process_footprints_reject_invalid_units_values_and_status(self):
+        self.process(30, "php", 10,
+                     "VmRSS:\t-1 kB\nVmSize:\t4096 MB\nThreads:\t0\n"
+                     "VmRSS:\t42 kB PRIVATE_TRAILING\nVmSize:\tPRIVATE_SIZE kB\n"
+                     "Threads:\t2 PRIVATE_TRAILING\n")
+        self.process(31, "ffmpeg", 10,
+                     "VmRSS:\t0 kB\nVmRSS:\t999 kB\nVmSize:\t1.5 kB\n"
+                     "VmSize:\t8192 kB\nThreads:\t1\nThreads:\tPRIVATE_THREADS\n")
+        self.process(32, "busybox", 10)
+        (self.proc / "32/status").write_text(
+            "PPid:\t10 PRIVATE_TRAILING\nVmRSS:\t16 kB\nThreads:\t1\n")
+        _, output = self.run_helper()
+        self.assertEqual(output.count("process pid=30 ppid=10 comm=php\n"), 5)
+        self.assertEqual(output.count(
+            "process pid=31 ppid=10 VmRSS_kB=0 VmSize_kB=8192 Threads=1 comm=ffmpeg\n"), 5)
+        self.assertNotIn("process pid=32 ", output)
+        self.assertNotIn("PRIVATE", output)
+        self.assertNotIn("VmRSS_kB=999", output)
+
+    def test_missing_memory_and_process_footprints_are_optional(self):
+        (self.proc / "meminfo").unlink()
+        (self.proc / "20/status").unlink()
+        self.process(30, "php-cgi", 10)
+        _, output = self.run_helper()
+        self.assertNotIn("memory ", output)
+        self.assertNotIn("process pid=20 ", output)
+        self.assertEqual(output.count("process pid=30 ppid=10 comm=php-cgi\n"), 5)
+        self.assertNotIn("VmRSS_kB=", output)
+        self.assertNotIn("VmSize_kB=", output)
+        self.assertNotIn("Threads=", output)
+        self.assertIn("handoff samples complete", output)
+
+    def test_process_limit_remains_64_per_sample_with_service_footprints(self):
+        for path in self.proc.iterdir():
+            if path.is_dir():
+                shutil.rmtree(path)
+        for pid in range(1000, 1070):
+            self.process(pid, "busybox", 1, "VmRSS:\t64 kB\nVmSize:\t128 kB\nThreads:\t1\n")
+        _, output = self.run_helper()
+        samples = output.split("sample nominal_seconds=")[1:]
+        self.assertEqual(len(samples), 5)
+        for sample in samples:
+            self.assertEqual(sample.count("process pid="), 64)
+            self.assertEqual(sample.count("VmRSS_kB=64 VmSize_kB=128 Threads=1 comm=busybox"), 64)
 
     def test_wpa_filter_rejects_invalid_or_duplicate_values(self):
         (self.base / "wpa-output").write_text(
