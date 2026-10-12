@@ -144,3 +144,18 @@ These artifacts supersede the earlier local archive hashes above, retain the ups
 | --- | ---: | --- |
 | `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,194,446 | `570dc3bbfb810e48df4450b6b447a725026a30c882d13fde55889c2c0538c827` |
 | `update-1.03.2412-uclibc.tgz` | 45,768,561 | `30dae50c575872c9501aabf31f883394d4c8e7c98a2f282003148182c9a1c7da` |
+
+## Stock network command compatibility correction
+
+The third physical test exercised the new diagnostics. The stock application remained at the same PID through the later handoff samples, and the user observed calibration and motion tracking. However, `wlan0` disappeared after init, a WPA process appeared only transiently, no DHCP client was observed, and stock logging reported an all-zero MAC value. This does not establish a change to the stored hardware MAC. All four staged diagnostic scripts matched their recorded hashes; the stock `ifconfig.txt` capture was empty.
+
+A concrete overlay defect was identified: init explicitly removed `/sbin/ifconfig` and `/sbin/udhcpc` before binding its replacement directory over `/sbin`. The verified original userspace archive contains no alternate executable paths for those names, and stock networking invokes both through PATH. The recovered stock BusyBox ash under ARM926 returned status 127 for both bare help commands with the aliases absent, confirming that it does not provide a standalone applet fallback. The exact 3007325.5 profile now recreates both aliases against the copied stock BusyBox before the bind, and fails init if link creation fails. Other profiles retain their prior behavior. This corrects the proven missing paths; a further physical boot must establish whether WLAN, DHCP and app access recover.
+
+Final local checks on 2026-10-12 all exited zero. The full host suite ran 295 cases in 29.149 seconds (259 executed, 36 optional ARM cases skipped), and the ARM926 suite passed all 295 in 71.711 seconds without skips. Four new fixtures cover actual PATH invocation through stock aliases in an isolated overlay, legacy alias removal, link failure and policy ordering before the system bind. The default build, backup kit and both archives succeeded. Artifact checks verified 146 source files, 119 ELF32 ARM files, 23 packaged program checks, two early-bootstrap ARM926 checks and every regular archive file against the build.
+
+The following development artifacts replace the earlier hashes above, with the existing upstream version number. Physical network recovery and stable release publication remain unclaimed.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,194,956 | `633d6d5e9bd04742dc321284c2248957073c015eb5fa6f839c80de720899ab38` |
+| `update-1.03.2412-uclibc.tgz` | 45,768,985 | `b068a4d41b50ce9f298ab5057c3ddc041903028e0319f1d49bc9585c896c8785` |

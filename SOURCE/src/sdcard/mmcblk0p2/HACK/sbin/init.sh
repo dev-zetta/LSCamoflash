@@ -372,6 +372,25 @@ if [ -n "$swap_space" -a "$swap_space" -gt 0 -a -n "$swap_file" ]; then
 	$swapon $swap_file
 fi
 
+# The stock 3007325.5 application resolves both commands through PATH. Its only
+# installed aliases are in /sbin, which the overlay will cover below.
+configure_overlay_network_tools()
+{
+	local network_tool
+	if [ "$anyka_md5" = "7c2a124cdd607ebef63fb66d063b6a87" ]; then
+		for network_tool in ifconfig udhcpc; do
+			$ln -sf "$sd_mnt/real/bin/busybox" "$sd_mnt/override/sbin/$network_tool" || {
+				echo "ERROR: Cannot preserve stock network tool $network_tool" >&2
+				return 1
+			}
+		done
+	else
+		$rm -f "$sd_mnt/override/sbin/ifconfig"
+		$rm -f "$sd_mnt/override/sbin/udhcpc"
+	fi
+	return 0
+}
+
 overlay_dirs="bin sbin lib lib/modules usr/bin usr/sbin usr/share usr/lib usr/local usr/modules"
 
 # Create overlay filesystem
@@ -438,8 +457,7 @@ if [ -f "$sd_overlay/fs.img" ]; then
  	$ln -sf $sd_mnt/real/bin/busybox $sd_mnt/override/sbin/busybox
  	$ln -sf $sd_mnt/real/bin/mtd_debug $sd_mnt/override/bin/mtd_debug
  	$ln -sf $sd_mnt/real/bin/mtd_debug $sd_mnt/bin/mtd_debug
-	$rm -f $sd_mnt/override/sbin/ifconfig
-	$rm -f $sd_mnt/override/sbin/udhcpc
+	configure_overlay_network_tools || exit 1
  	for i in jmacs jpico jstar rjoe; do
 		$ln -sf $sd_bin/joe $sd_mnt/bin/$i
 	done
