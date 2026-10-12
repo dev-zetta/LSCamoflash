@@ -67,3 +67,6 @@ docs/autobuild
 .local/
 __pycache__/
 *.pyc
+
+# Generated firmware backup kit (separate from runtime archives)
+SOURCE/backup-kit/

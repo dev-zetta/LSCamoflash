@@ -1,0 +1,75 @@
+# Back up stock LSC camera firmware through the SD boot hook
+
+The reusable [backup kit](../tools/firmware-backup/README.md) was physically verified on an LSC Smart PTZ Camera, SI L25502, article **3007325.5**, app firmware **V1.0.0 (6.2863.125)**, exact build **6.2863.125.1348**. It recovered all eight exposed MTD partitions, totaling **8,388,608 bytes**, with two matching reads of every partition, a stock userspace archive and matching library files. USB on this unit did not expose a firmware interface. This procedure uses its existing SD boot hook; it does not require an installed LSCamoflash runtime.
+
+The kit does not erase, program or restore flash. Stock startup itself copies the empty AP marker to persistent `/etc/config/hostapd.conf` before invoking the kit, and performs its normal configuration maintenance. The result is a backup taken after those startup effects, rather than a pristine pre-boot configuration. Removing the SD markers does not undo persistent stock changes. Whole-chip coverage and a successful restore have not been established. Other camera revisions must be checked separately; this tool rejects NAND and unsupported NOR geometry.
+
+Backups, configuration archives and logs can contain Wi-Fi, cloud and device credentials. Keep the complete result in private storage. Share the public scripts and redacted technical findings, not your firmware dump or raw logs.
+
+## Build the kit
+
+From a built checkout, run:
+
+```sh
+python3 tools/firmware-backup/build-kit.py
+```
+
+This uses the repository's ARM uClibc compiler and built static BusyBox, and writes a separate generated directory at `SOURCE/backup-kit/`. To build its dependencies first, use `make -C SOURCE backup-kit`. Both commands only create host-side files. Python 3.9 or later is required. The [tool guide](../tools/firmware-backup/README.md#build) describes compiler/BusyBox overrides and optional ARM926 QEMU checks.
+
+The generated `card/` directory contains `hostapd`, `busybox`, `dump.sh`, `_ht_ap_mode.conf`, `_ht_get_log.conf` and `SHA256SUMS`. The native ARM launcher and BusyBox are built locally; no stock proprietary binary is included. Check the generated files before using them:
+
+```sh
+(cd SOURCE/backup-kit/card && sha256sum -c SHA256SUMS)
+```
+
+## Prepare a spare card
+
+Use a spare, mounted FAT32 microSD card with sufficient free space; 512 MiB free is a conservative allowance within this kit's bounded collection limits. The verified camera accepted a whole-device FAT32 card without a partition table. A FAT32 first partition is also understood by its stock mount script. This backup procedure does not need LSCamoflash's two-partition runtime layout. Do not run the destructive runtime installer or disk preparation script merely to take a backup.
+
+With the camera powered off and the spare card mounted on the computer, copy only the generated `card/` contents to its root. Use your actual mount path below. The interactive copy protects existing filenames from silent replacement; use a clean spare card if it already contains another `hostapd` hook or firmware update files.
+
+```sh
+CARD_MOUNT="/media/your-user/CAMERA"
+cp -i SOURCE/backup-kit/card/hostapd SOURCE/backup-kit/card/busybox SOURCE/backup-kit/card/dump.sh SOURCE/backup-kit/card/SHA256SUMS "$CARD_MOUNT/"
+cp -i SOURCE/backup-kit/card/_ht_ap_mode.conf SOURCE/backup-kit/card/_ht_get_log.conf "$CARD_MOUNT/"
+(cd "$CARD_MOUNT" && sha256sum -c SHA256SUMS)
+sync
+```
+
+Do not copy firmware update `.bin` files, `update.tar` or recovery markers to the card root. Do not mix the backup hook with the runtime hook: they use the same `hostapd` filename. Close file-manager windows and safely eject the card through your operating system before removing it.
+
+## Capture and verify
+
+1. Insert the card into the powered-off camera, then power it on. Give startup and the backup about five minutes. The camera can be unavailable in the app during this AP boot attempt; do not reset or re-pair it to address that temporary state.
+2. Power the camera off before removing the card, then mount the card on the computer. Look for `backup-launcher.log` at its root and `firmware-backup/run-*/` directories. The camera clock may start in the year 2000, so the timestamp alone does not establish when a capture happened.
+3. Copy the entire `firmware-backup/` directory and root diagnostic log into private host storage. Retain failed attempts too. Verify the chosen run with the host-side script:
+
+```sh
+python3 tools/firmware-backup/verify-backup.py "/private/path/firmware-backup/run-TIMESTAMP-PID"
+```
+
+A successful command exits zero and reports `verified: true`, the partition count, total bytes and individual SHA-256 hashes. On the tested unit, `status.txt` reported `VERIFIED_NOR_BACKUP`, eight partitions and 8 MiB. The verifier checks the complete recorded inventory and archive payloads without executing or extracting the recovered firmware. A partial archive or a nonzero exit is not a verified backup. Keep the paired partition files and metadata together; do not concatenate them into a guessed flash image.
+
+The dumper has a 240-second monotonic budget, per-command timeouts, up to three paired read attempts, explicit size limits, and strict visible MMC/FAT mount checks. Kernel I/O stuck in an uninterruptible state cannot be bounded by a userspace timeout. Missing output is not proof that the hook never ran: the launcher intentionally writes no log when it cannot establish a safe SD destination. Inspect the launch log and incomplete run status before changing the procedure.
+
+## Disable the backup hook
+
+After verifying and copying the result, move the two root markers into an ordinary nested directory on the card while the camera is off:
+
+```sh
+mkdir -p "$CARD_MOUNT/diagnostic-archive/disabled-backup-kit"
+mv -i "$CARD_MOUNT/_ht_ap_mode.conf" "$CARD_MOUNT/_ht_get_log.conf" "$CARD_MOUNT/diagnostic-archive/disabled-backup-kit/"
+sync
+```
+
+The exact tested firmware checks these marker names only at the card root. Nested diagnostic files and backups therefore do not reactivate this hook. Keep the backup output; deleting it is unnecessary. Safely eject the card, cold-boot the camera, and check normal app access, Wi-Fi and recordings. These acceptance checks and restoration are separate from successful backup verification.
+
+## Developer checks
+
+The [public fixtures](../tests/) synthesize devices, mounts and partition contents. They do not read real MTD devices, mount cards or require the private firmware dump:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_firmware_backup*.py' -v
+```
+
+Set `BACKUP_ARM_CC`, `BACKUP_ARM_BUSYBOX` and `BACKUP_QEMU` to executable paths to include ARM926 tests. Production binaries never enable the fixture mount/device substitutions. The NOR write-unit allowlist includes the tested vendor report of 256 bytes with zero OOB; that observation is not a universal rule for all NOR drivers.

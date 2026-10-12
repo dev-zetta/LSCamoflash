@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install sparse-image partition test tool
-        run: sudo apt-get update && sudo apt-get install -y fdisk
+      - name: Install regression tools
+        run: sudo apt-get update && sudo apt-get install -y fdisk busybox gcc
       - name: Run host-side regression tests
         run: python3 -m unittest discover -s tests -v

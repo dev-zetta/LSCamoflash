@@ -1105,6 +1105,11 @@ $(BUILD_DIR)/install.ps1: $(SDCARD_FILES) $(SRC_DIR)/contrib/motor/motor.c $(SRC
 	@rm -rf $(BUILD_HACK)/lib/modules/$(KERNEL_VERSION)/source >/dev/null 2>&1 || true
 	@touch $@
 	
+# Separate backup kit: root boot markers must not be mixed with the runtime.
+.PHONY: backup-kit
+backup-kit: download toolchain packages $(STAGING_DIR) busybox
+	@python3 $(ROOT_DIR)/../tools/firmware-backup/build-kit.py --cc "$(CC)" --busybox "$(STAGE_HACK)/bin/busybox" --output "$(ROOT_DIR)/backup-kit"
+
 $(BUILD_HACK)/sbin/mosquitto:
 	@cp -a $(STAGE_HACK)/etc/mosquitto $(BUILD_HACK)/etc/config >/dev/null 2>&1 || true
 	@cp $(STAGE_HACK)/usr/sbin/mosquitto $@ >/dev/null 2>&1 || true
