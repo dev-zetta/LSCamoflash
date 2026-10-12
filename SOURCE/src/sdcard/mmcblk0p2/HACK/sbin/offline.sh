@@ -10,12 +10,19 @@ while [ `date +%s` -lt 1645543474 ]; do
  sleep 10
 done
 
-pattern=":$port_ftp\|:$port_telnet\|:123\|:554\|:$port_onvif\|:6668\|:$port_http"
+allowed_ports="$port_ftp\|$port_telnet\|123\|$port_onvif\|6668\|$port_http"
+if [ "${device_rtsp_available:-1}" = "1" ]; then
+ for rtsp_port in "${device_rtsp_main_port:-554}" "${device_rtsp_sub_port:-554}"; do
+  case "$rtsp_port" in ''|*[!0-9]*) continue;; esac
+  [ "$rtsp_port" -ge 1 ] && [ "$rtsp_port" -le 65535 ] || continue
+  allowed_ports="$allowed_ports\|$rtsp_port"
+ done
+fi
+# Match complete ports, so allowing 88 cannot accidentally allow 888 or 8888.
+pattern=":\($allowed_ports\)\([[:space:]]\|$\)"
 
 IP_ADDR=$(ip -4 addr show wlan0 | grep inet | awk '{print $2}' | cut -d'/' -f1)
-while [[ -z $IP_ADDR ]]; do
-    IP_ADDR=$(ip -4 addr show wlan0 | grep inet | awk '{print $2}' | cut -d'/' -f1)
-done
+[ -n "$IP_ADDR" ] || exit 1
 
 echo "${0}: blocked hosts" >> $offline_log
 
@@ -38,7 +45,7 @@ while [ `netstat -ntu 2>&1 | grep -v 127.0.0.1 | grep -v "$pattern" | grep ESTAB
     continue
   fi
   
-  if [ "`route -n | grep -c $ip`" == "0" ]; then
+  if [ "`route -n | grep -c $ip`" = "0" ]; then
    route add -net $ip netmask 255.255.255.255 gw 127.0.0.1  2>&1 >> $offline_log
    echo "${0}: blocked $ip" >> $offline_log
   fi

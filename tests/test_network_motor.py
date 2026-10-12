@@ -20,16 +20,24 @@ def runtime_shell(default):
 
 
 class NetworkTests(unittest.TestCase):
-    def run_network_setup(self, completed_after):
+    EXACT_MD5 = "7c2a124cdd607ebef63fb66d063b6a87"
+
+    def run_network_setup(self, completed_after=0, *, factory=False, override=True,
+                          checksum=EXACT_MD5, paired=None, supplicant=True,
+                          use_dhcp=True):
         source = (HACK / "sbin/network.sh").read_text()
-        # Execute the real association wait and DHCP branch without the host
-        # mounts, process termination, config writes or monitoring loop.
-        block = source.split("\t# Setup network\n", 1)[1]
-        block = block.split('\telse\n        network_mode="manual"', 1)[0] + "\nfi\nwait\n"
+        # Run the real configuration and startup path. Only omit the perpetual
+        # monitor; every privileged/external network command is a fixture stub.
+        startup = source.rsplit('\nif [ "$network_mode" != "tuya" ]; then', 1)[0] + "\nwait\n"
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
+            hack = path / "HACK"
+            for directory in (hack / "etc", hack / "bin", hack / "sbin", path / "stock/bin",
+                              path / "stock/sbin", path / "ram", path / "log", path / "config",
+                              path / "commands"):
+                directory.mkdir(parents=True, exist_ok=True)
             events = path / "events"
-            cli = path / "wpa_cli"
+            cli = path / "stock/bin/wpa_cli"
             cli.write_text('''#!/bin/sh
 count=$(cat "$TEST_COUNT" 2>/dev/null || echo 0)
 count=$((count + 1))
@@ -41,35 +49,170 @@ else
     echo wpa_state=ASSOCIATING
 fi
 ''')
-            sleep = path / "sleep"
+            wpa = path / "stock/bin/wpa_supplicant"
+            wpa.write_text('''#!/bin/sh
+printf 'supplicant' >> "$TEST_EVENTS"
+for arg do printf ' <%s>' "$arg" >> "$TEST_EVENTS"; done
+printf '\\n' >> "$TEST_EVENTS"
+echo FIXTURE_PRIVATE_WPA_OUTPUT
+''')
+            sleep = path / "commands/sleep"
             sleep.write_text('#!/bin/sh\necho sleep >> "$TEST_EVENTS"\n')
-            dhcp = path / "udhcpc"
-            dhcp.write_text('#!/bin/sh\necho dhcp >> "$TEST_EVENTS"\n')
-            for command in (cli, sleep, dhcp):
+            dhcp = path / "commands/udhcpc"
+            dhcp.write_text('''#!/bin/sh
+printf 'dhcp' >> "$TEST_EVENTS"
+for arg do printf ' <%s>' "$arg" >> "$TEST_EVENTS"; done
+printf '\\n' >> "$TEST_EVENTS"
+''')
+            mount = path / "commands/mount"
+            mount.write_text('#!/bin/sh\necho mount >> "$TEST_EVENTS"\n')
+            pgrep = path / "commands/pgrep"
+            pgrep.write_text('#!/bin/sh\nexit 1\n')
+            for command in (cli, wpa, sleep, dhcp, mount, pgrep):
                 command.chmod(0o755)
+            if not supplicant:
+                wpa.unlink()
+            # The override branch enumerates stock scripts before binding them;
+            # these are only ordinary fixture files and mount itself is stubbed.
+            (path / "stock/sbin/station_connect.sh").touch()
+            (path / "stock/sbin/wifi_fixture.sh").touch()
+            paired_path = path / "ram/wpa_supplicant.conf"
+            if paired is not None:
+                paired_path.write_text(paired)
+            settings = {
+                "sd_path": tmp, "sd_bin": str(hack / "bin"), "sd_sbin": str(hack / "sbin"),
+                "sd_log": str(path / "log"), "sys_bin": str(path / "stock/bin"),
+                "sys_usr_bin": str(path / "stock/bin"), "sys_usr_sbin": str(path / "stock/sbin"),
+                "sys_temp": str(path / "ram"), "sys_config": str(path / "config"),
+                "network_file": str(path / "ram/network.init"), "system_hostname": "test.camera",
+                "wifi_config_override": "1" if override else "0", "wifi_driver": "fixture-driver",
+                "wifi_ssid": "fixture-network", "wifi_psk": "fixture-password",
+                "wifi_scan_ssid": "1", "wifi_key_mgmt": "WPA-PSK", "wifi_pairwise": "CCMP",
+                "wifi_group": "CCMP", "wifi_use_dhcp": "1" if use_dhcp else "0",
+                "wifi_ip_address": "" if use_dhcp else "192.0.2.20", "wifi_netmask": "255.255.255.0",
+                "local_rtsp_only": "1" if factory else "0", "anyka_md5": checksum,
+            }
+            conf = hack / "etc/hack.conf"
+            conf.write_text("".join(f"{key}={shlex.quote(value)}\n" for key, value in settings.items()))
+            commands = {"cat": "cat", "grep": "grep", "cp": "cp", "mv": "mv", "kill": "true",
+                        "sleep": str(sleep), "udhcpc": str(dhcp), "ifconfig": "true",
+                        "route": "true", "cut": "cut"}
+            (hack / "etc/commands.conf").write_text(
+                "".join(f"{key}={shlex.quote(value)}\n" for key, value in commands.items()))
             env = dict(os.environ, TEST_COUNT=str(path / "count"),
                        TEST_EVENTS=str(events), TEST_COMPLETED_AFTER=str(completed_after),
-                       wpa_supplicant="true", wpa_cli=str(cli), grep="grep",
-                       sleep=str(sleep), sd_log=tmp, wifi_use_dhcp="1",
-                       ifconfig="true", udhcpc=str(dhcp), cut="cut",
-                       system_hostname="test.camera", sd_sbin=tmp)
-            result = subprocess.run([*runtime_shell("sh"), "-c", block], env=env,
-                                    capture_output=True, text=True, timeout=5)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return events.read_text().splitlines()
+                       hack=str(hack), hack_conf=str(conf), hack_custom_conf="",
+                       PATH=str(path / "commands") + os.pathsep + os.environ["PATH"])
+            result = subprocess.run([*runtime_shell("sh"), "-c", startup], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            marker = (path / "ram/network.init").read_text().strip()
+            return {
+                "result": result, "marker": marker,
+                "events": events.read_text().splitlines() if events.exists() else [],
+                "paired": paired_path.read_text() if paired_path.exists() else None,
+                "custom": (path / "ram/wpa_custom.conf").exists(),
+                "copied": (hack / "bin/wifi_sup").exists(),
+                "wpa_log": (path / "log/wpa_supplicant.log").read_text()
+                           if (path / "log/wpa_supplicant.log").exists() else None,
+            }
+
+    def assert_ready(self, setup, mode="dhcp"):
+        self.assertEqual(setup["result"].returncode, 0, setup["result"].stderr)
+        self.assertEqual(setup["marker"], mode)
 
     def test_dhcp_waits_for_delayed_association(self):
-        events = self.run_network_setup(7)
-        self.assertEqual(events[-2:], ["poll 8", "dhcp"])
+        setup = self.run_network_setup(7)
+        self.assert_ready(setup)
+        events = setup["events"]
         self.assertEqual(events.count("sleep"), 7)
+        self.assertLess(events.index("poll 8"), next(i for i, event in enumerate(events)
+                                                   if event.startswith("dhcp")))
 
     def test_ready_link_starts_dhcp_without_sleep(self):
-        self.assertEqual(self.run_network_setup(0), ["poll 1", "dhcp"])
+        setup = self.run_network_setup()
+        self.assert_ready(setup)
+        self.assertNotIn("sleep", setup["events"])
+        self.assertEqual(sum(event.startswith("dhcp") for event in setup["events"]), 1)
 
-    def test_association_timeout_is_bounded(self):
-        events = self.run_network_setup(-1)
-        self.assertEqual(events.count("sleep"), 30)
-        self.assertEqual(events[-1], "dhcp")
+    def test_legacy_override_timeout_is_bounded(self):
+        setup = self.run_network_setup(-1)
+        self.assert_ready(setup)
+        self.assertEqual(setup["events"].count("sleep"), 30)
+        self.assertTrue(any(event.startswith("dhcp") for event in setup["events"]))
+
+    def test_normal_tuya_leaves_network_to_stock(self):
+        setup = self.run_network_setup(override=False)
+        self.assert_ready(setup, "tuya")
+        self.assertEqual(setup["events"], [])
+        self.assertFalse(setup["custom"])
+
+    def test_older_factory_firmware_keeps_legacy_path(self):
+        setup = self.run_network_setup(factory=True, override=False, checksum="older")
+        self.assert_ready(setup, "tuya")
+        self.assertEqual(setup["events"], [])
+
+    def test_factory_without_ram_config_requires_override(self):
+        for config in (None, ""):
+            with self.subTest(config=config):
+                setup = self.run_network_setup(factory=True, override=False, paired=config)
+                self.assertEqual(setup["result"].returncode, 1)
+                self.assertEqual(setup["marker"], "failed")
+                self.assertIn("requires wifi_config_override=1", setup["result"].stderr)
+                self.assertEqual(setup["events"], [])
+
+    def test_factory_reuses_ram_config_without_copying_or_logging_it(self):
+        config = "FIXTURE_PAIRED_CREDENTIALS\n"
+        setup = self.run_network_setup(3, factory=True, override=False, paired=config,
+                                       use_dhcp=False)
+        self.assert_ready(setup)
+        self.assertEqual(setup["paired"], config)
+        self.assertFalse(setup["custom"])
+        self.assertFalse(setup["copied"])
+        self.assertIsNone(setup["wpa_log"])
+        self.assertNotIn("mount", setup["events"])
+        self.assertEqual(setup["events"].count("sleep"), 3)
+        invocation = next(event for event in setup["events"] if event.startswith("supplicant"))
+        self.assertIn("<-Dnl80211>", invocation)
+        self.assertIn("/ram/wpa_supplicant.conf>", invocation)
+        dhcp = next(event for event in setup["events"] if event.startswith("dhcp"))
+        self.assertIn("--script=", dhcp)
+        self.assertIn("/HACK/sbin/udhcpc-hook.sh>", dhcp)
+        self.assertNotIn("FIXTURE_PRIVATE", setup["result"].stdout + setup["result"].stderr)
+        self.assertNotIn(config.strip(), setup["result"].stdout + setup["result"].stderr)
+
+    def test_factory_missing_stock_tool_fails(self):
+        setup = self.run_network_setup(factory=True, override=False, paired="fixture\n",
+                                       supplicant=False)
+        self.assertEqual(setup["result"].returncode, 1)
+        self.assertEqual(setup["marker"], "failed")
+        self.assertIn("requires the stock WPA", setup["result"].stderr)
+        self.assertEqual(setup["events"], [])
+
+    def test_factory_association_failure_prevents_dhcp(self):
+        for override in (False, True):
+            with self.subTest(override=override):
+                setup = self.run_network_setup(-1, factory=True, override=override, paired="fixture\n")
+                self.assertEqual(setup["result"].returncode, 1)
+                self.assertEqual(setup["marker"], "failed")
+                self.assertEqual(setup["events"].count("sleep"), 30)
+                self.assertFalse(any(event.startswith("dhcp") for event in setup["events"]))
+                self.assertIn("association failed", setup["result"].stderr)
+
+    def test_explicit_override_takes_priority_over_paired_ram_file(self):
+        setup = self.run_network_setup(factory=True, paired="fixture paired config\n")
+        self.assert_ready(setup)
+        self.assertTrue(setup["custom"])
+        self.assertTrue(setup["copied"])
+        self.assertIn("mount", setup["events"])
+        invocation = next(event for event in setup["events"] if event.startswith("supplicant"))
+        self.assertIn("<-Dfixture-driver>", invocation)
+        self.assertIn("/ram/wpa_custom.conf>", invocation)
+        self.assertNotIn("/ram/wpa_supplicant.conf>", invocation)
+
+    def test_explicit_static_override_is_preserved(self):
+        setup = self.run_network_setup(use_dhcp=False)
+        self.assert_ready(setup, "manual")
+        self.assertFalse(any(event.startswith("dhcp") for event in setup["events"]))
 
 
 class MotorTests(unittest.TestCase):

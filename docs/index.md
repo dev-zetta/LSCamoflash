@@ -4,6 +4,8 @@ layout: default
 
 # 👁️‍🗨️ LSCamoflash
 
+For this fork's current evidence and setup, read the [verified NOR backup procedure](./firmware-backup.md), [experimental 3007325.5 runtime guide](./camera-3007325.5.md) and [integration notes](./integration.md). The backup has been physically verified on the documented camera; runtime streaming, ONVIF and custom PTZ acceptance remain separate device tests. The release notes below describe legacy upstream features, and upstream release downloads do not include this fork's changes.
+
 LSCamoflash is a modified firmware package for LSC Tuya based IP cameras that adds powerful features like local-only operation, cloud-free RTSP streaming, camera control via web UI, and more.
 
 🚀 Now with PHP & Python CLI/Web support, FFMPEG integration, ONVIF PTZ control, SD card auto-recovery and optional `radare2` for advanced tinkering.

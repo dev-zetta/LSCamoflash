@@ -13,7 +13,9 @@ export busybox_firmware="$sys_bin/busybox"
 [ -x "$busybox_hack" -a -x "$busybox_firmware" ] || exit 1
 . "$hack/etc/commands.conf" || exit 1
 
-anyka_md5="${1:-$($md5sum "$sd_bin/anyka_ipc" | $awk '{print $1}')}"
+stock_md5_line=$("$busybox_hack" md5sum "$sd_bin/anyka_ipc") || exit 1
+stock_md5=$(printf '%s\n' "$stock_md5_line" | $awk '{print $1}')
+anyka_md5="${1:-$stock_md5}"
 case "$anyka_md5" in
 	''|*[!a-fA-F0-9]*) echo "Invalid stock anyka_ipc checksum" >&2; exit 1 ;;
 esac
@@ -23,9 +25,31 @@ anyka_ipc_bin="$sd_bin/anyka_ipc"
 anyka_ipc_lib="$sd_lib"
 force_factory="$FORCE_AK39_FACTORY_ON_ORIGIN"
 
+# This revision has no validated replacement or IPS patch. Recheck on every
+# watchdog restart, since the wrapper reloads configuration independently of init.
+stock_binary_only=0
+if [ "$anyka_md5" = "7c2a124cdd607ebef63fb66d063b6a87" -o "$stock_md5" = "7c2a124cdd607ebef63fb66d063b6a87" ]; then
+	if [ "$anyka_md5" != "$stock_md5" ]; then
+		echo "Stock binary MD5 does not match the requested 3007325.5 profile" >&2
+		exit 1
+	fi
+	stock_sha256_line=$("$busybox_hack" sha256sum "$anyka_ipc_bin") || exit 1
+	stock_sha256=$(printf '%s\n' "$stock_sha256_line" | $awk '{print $1}')
+	if [ "$stock_sha256" != "d710cfe53a9e0098e4271db4fff2fc485e38acdaf78d965accaf2e516980534d" ]; then
+		echo "Stock 3007325.5 binary does not match the supported firmware" >&2
+		exit 1
+	fi
+	stock_binary_only=1
+	if [ "$FORCE_AK39_FACTORY_ON_ORIGIN" = "1" -o "$FORCE_AK39_FACTORY_ON_PATCHED" = "1" -o \
+		"$FORCE_AK39_FACTORY_ON_STATIC_PATCHED" = "1" -o "$FORCE_AK39_FACTORY_ON_STATIC" = "1" ]; then
+		echo "AK39 manufacturing mode is unsupported for 3007325.5; use local_rtsp_only=1 instead" >&2
+		exit 1
+	fi
+fi
+
 # Factory RTSP deliberately uses the stock firmware even if a dynamic or static
 # patch is installed. It also works without an IPS patch on some firmware builds.
-if [ "$local_rtsp_only" != "1" ]; then
+if [ "$local_rtsp_only" != "1" -a "$stock_binary_only" != "1" ]; then
 	if [ -x "$sd_bin/anyka_ipc_patched" ]; then
 		anyka_ipc_bin="$sd_bin/anyka_ipc_patched"
 		force_factory="$FORCE_AK39_FACTORY_ON_PATCHED"
@@ -66,7 +90,30 @@ export LD_LIBRARY_PATH="/lib:/usr/lib:$anyka_ipc_lib"
 # the marker. A marker supplied by the firmware or user remains theirs to clear.
 factory_marker="$sys_temp/_ak39_factory.ini"
 factory_owned="$sys_temp/anyka_factory.owned"
-if [ "$local_rtsp_only" = "1" -o "$force_factory" = "1" ]; then
+ap_marker="$sys_temp/_ht_ap_mode.conf"
+ap_owned="$sys_temp/anyka_rtsp_ap.owned"
+if [ "$stock_binary_only" = "1" ]; then
+	# On this build AK39 mode is a manufacturing test, not the RTSP branch.
+	# Remove our obsolete marker, but refuse to override another owner's mode.
+	if [ -f "$factory_owned" ]; then
+		$rm -f "$factory_marker" "$factory_owned" || exit 1
+	fi
+	if [ -e "$factory_marker" ]; then
+		echo "Conflicting AK39 manufacturing marker; refusing to start 3007325.5" >&2
+		exit 1
+	fi
+	if [ "$local_rtsp_only" = "1" ]; then
+		if [ ! -e "$ap_marker" ]; then
+			$touch "$ap_owned" || exit 1
+			if ! $touch "$ap_marker"; then
+				$rm -f "$ap_owned"
+				exit 1
+			fi
+		fi
+	elif [ -f "$ap_owned" ]; then
+		$rm -f "$ap_marker" "$ap_owned" || exit 1
+	fi
+elif [ "$local_rtsp_only" = "1" -o "$force_factory" = "1" ]; then
 	if [ ! -e "$factory_marker" ]; then
 		$touch "$factory_owned" || exit 1
 		if ! $touch "$factory_marker"; then
@@ -92,6 +139,6 @@ case "$FORCE_STATE_LED_OFF" in
 esac
 
 if [ "$local_rtsp_only" = "1" ]; then
-	exec "$busybox_hack" sh "$sd_sbin/anyka_rtsp.sh"
+	exec "$busybox_hack" sh "$sd_sbin/anyka_rtsp.sh" "$anyka_md5"
 fi
 exec "$anyka_ipc_bin"

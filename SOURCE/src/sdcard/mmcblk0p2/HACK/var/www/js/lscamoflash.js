@@ -265,6 +265,38 @@ function updatePassword(newPassword1, newPassword2) {
     });
 }
 
+function getLocalURL(urlType) {
+    var link = null;
+    $("#confirmDialog").dialog({
+        autoOpen: false,
+        modal: true,
+        title: urlType + " Link",
+        buttons: {
+            "Copy link": function() {
+                if (link) copyToClipboard(link);
+            },
+            "Close": function() {
+                $(this).dialog("close");
+            }
+        }
+    }).text("Loading local stream URL...");
+    $("#confirmDialog").dialog("open");
+    $.ajax({
+        url: "/cgi-bin/streamurl.cgi",
+        type: "GET",
+        dataType: "json",
+        data: {type: urlType, source: "local"},
+        success: function(response) {
+            link = response.url;
+            $("#confirmDialog").text(link);
+        },
+        error: function(xhr) {
+            var message = xhr.responseJSON && xhr.responseJSON.error;
+            $("#confirmDialog").text(message || "Local stream is unavailable");
+        }
+    });
+}
+
 function getRemoteURL(urlType) {
     $.ajax({
         url: "/cgi-bin/streamurl.cgi",
@@ -1065,39 +1097,11 @@ $(document).ready(function() {
     });
     
     $("#btn-rtsp-local").click(function() {
-        var link = "rtsp://" + address + ":554/main_ch";
-        $("#confirmDialog").dialog({
-            autoOpen: false,
-            modal: true,
-            title: "RTSP Link",
-            buttons: {
-                "Copy link": function() {
-                    copyToClipboard(link);
-                },
-                "Close": function() {
-                    $(this).dialog("close");
-                }
-            }
-        }).html(link);
-        $("#confirmDialog").dialog("open");
+        getLocalURL("RTSP");
     });
 
     $("#btn-onvif-local").click(function() {
-        var link = "onvif://" + address + ":5000/";
-        $("#confirmDialog").dialog({
-            autoOpen: false,
-            modal: true,
-            title: "ONVIF Link",
-            buttons: {
-                "Copy link": function() {
-                    copyToClipboard(link);
-                },
-                "Close": function() {
-                    $(this).dialog("close");
-                }
-            }
-        }).html(link);
-        $("#confirmDialog").dialog("open");
+        getLocalURL("ONVIF");
     });
 
     $("#btn-rtsp-cloud").click(function() {

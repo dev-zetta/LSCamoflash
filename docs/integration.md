@@ -13,7 +13,7 @@ All four open pull requests were merged with their original commits and attribut
 | [#8](https://github.com/Bunkerschild/LSCamoflash/pull/8) | `6049046d650911919a243dba12f95bf81813c7aa` | Poll Wi-Fi association for up to 30 seconds before starting DHCP. |
 | [#9](https://github.com/Bunkerschild/LSCamoflash/pull/9) | `be20358f95ea1da3d8c012f2f8ee09d948aa83e5` | IPC-XC-C323 model detection and PTZ offsets, and suppress motor diagnostics in JSON responses. |
 
-The installer additionally validates the selected whole removable disk, checks command failures, accounts for partition alignment and releases temporary mounts. Installer tests replace disk commands with stubs; they never erase a real disk. On Debian/Ubuntu, the Linux installer requires `dosfstools`, `fdisk`, `parted`, `udev` and `util-linux`, plus Bash and coreutils. It asks for the whole device name twice and refuses to proceed after a failed unmount or partition operation. PTZ offsets in PR #9 were verified on hardware by its author; no camera was attached for this fork's validation.
+The installer additionally validates the selected whole removable disk, checks command failures, accounts for partition alignment and releases temporary mounts. Installer tests replace disk commands with stubs; they never erase a real disk. On Debian/Ubuntu, the Linux installer requires `dosfstools`, `fdisk`, `parted`, `udev` and `util-linux`, plus Bash and coreutils. It asks for the whole device name twice and refuses to proceed after a failed unmount or partition operation. PTZ offsets in PR #9 were verified on hardware by its author. This fork's initial build validation did not use a camera; subsequent work physically verified the [3007325.5 backup procedure](firmware-backup.md) and added its [experimental runtime profile](camera-3007325.5.md). That evidence does not validate PR #9 on different hardware.
 
 ## Open issue disposition
 
@@ -27,17 +27,19 @@ Issues #4 and #10 are not claimed fixed for their exact firmware revisions. A ch
 
 ## Local RTSP setup
 
-On a camera with factory RTSP support, put the following line in `HACK/etc/hack_custom.conf` on the second SD partition and reboot:
+For older firmware using the AK39 factory RTSP path, put the following line in `HACK/etc/hack_custom.conf` on the second SD partition and reboot:
 
 ```sh
 export local_rtsp_only="1"
 ```
 
-The wrapper selects the camera's unmodified binary and creates `/tmp/_ak39_factory.ini` before starting it. Local mode bypasses dynamic and static patched binary selection and does not wait for a default gateway, so a LAN without Internet routing can use it. Normal firmware supervision can restart the process if it exits.
+For those older profiles, the wrapper selects the camera's unmodified binary and creates `/tmp/_ak39_factory.ini` before starting it. Local mode bypasses dynamic and static patched binary selection and does not wait for a default gateway, so a LAN without Internet routing can use it. Normal firmware supervision can restart the process if it exits.
 
 For the C323, the reporter verified `rtsp://<camera-ip>:554/main_ch` over TCP and UDP and ONVIF on port 5000. Factory mode replaces the normal vendor runtime; it does not establish simultaneous Tuya cloud operation. The reporter also observed RTSP without authentication, so restrict access to the intended LAN. The newer binaries in #4/#10 remain unverified even with this option.
 
 Removing the option and rebooting restores normal binary selection. The fork also invalidates a cached generated patch when the original firmware binary changes, so a patch from an older firmware revision is not silently reused.
+
+The exact 3007325.5 firmware uses different RAM mode markers, stream ports and codecs. Follow its [camera-specific configuration](camera-3007325.5.md#stock-tuya-or-local-rtsp), including explicit Wi-Fi settings for a cold local RTSP boot. The older `554/main_ch` address above does not apply to that profile.
 
 ## Reproducing verification
 
@@ -54,13 +56,23 @@ cd SOURCE
 make nproc=8 all release update
 ```
 
-After building, install `qemu-user` on Debian/Ubuntu and run `python3 src/bin/verify-build.py` from `SOURCE` to repeat the packaged program and archive checks. The checker accepts `--qemu /path/to/qemu-arm` for a portable local emulator.
+After building, install `qemu-user` on Debian/Ubuntu and run `python3 src/bin/verify-build.py` with Python 3.11 or later from `SOURCE` to repeat the packaged program and archive checks. The checker accepts `--qemu /path/to/qemu-arm` for a portable local emulator.
+
+From the repository root, include the ARM926 runtime and backup checks in the full suite with:
+
+```sh
+CAMOFLASH_RUNTIME_SHELL="qemu-arm -cpu arm926 $PWD/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash" \
+BACKUP_ARM_CC="$PWD/SOURCE/toolchain/uclibc/bin/arm-buildroot-linux-uclibcgnueabi-gcc" \
+BACKUP_ARM_BUSYBOX="$PWD/SOURCE/build/mmcblk0p2/HACK/bin/busybox" \
+BACKUP_QEMU="qemu-arm" \
+python3 -m unittest discover -s tests -v
+```
 
 The build requires the host dependencies listed in the README and real archive contents rather than Git LFS pointer files. The downloader hydrates pointer files atomically and checks their recorded SHA-256 before replacing them; a global Git LFS installation is optional. Creating the build directory no longer increments the source version. Version changes are explicit through the existing `update-version-*` targets. The fork's Build-Test workflow builds the default configuration and uploads archives and a log. Experimental libc configurations and all optional packages are separate from this default build gate. GitHub Pages publication and stable releases are manual operations.
 
-Host regressions, cross compilation and archive inspection do not establish SD installation, physical PTZ motion, camera boot, RTSP frame delivery or ONVIF discovery on real hardware. The following checks completed locally on 2026-10-12. No camera hardware was attached.
+Host regressions, cross compilation and archive inspection do not establish SD installation, physical PTZ motion, camera boot, RTSP frame delivery or ONVIF discovery on real hardware. The initial checks below completed locally on 2026-10-12 before the subsequent camera backup work. They describe that earlier fork snapshot, not the current artifacts. The later backup verification and runtime acceptance limits are recorded in the camera-specific guides.
 
-## Completed validation
+## Initial fork validation
 
 | Check | Result |
 | --- | --- |
@@ -80,6 +92,27 @@ The first build attempt failed because the bundled toolchains put an older Bison
 | `LSCamoflash-1.03.2412-uclibc.tar.gz` | 44,463,095 | `f72a3a9288e967e562b7be1dc8bd835cc6d60d66b662bf57a6cd29a0b52d3610` |
 | `update-1.03.2412-uclibc.tgz` | 44,038,068 | `0d44aaec20f4666ddef981bfe45ca365cde8aae4fd34ff318d725858e2d19ede` |
 
-These are development artifacts for this fork, with the existing upstream version number. No stable release or GitHub Pages firmware publication was performed. Build-Test publishes reviewable workflow artifacts separately from a stable release.
+These historical development artifacts belong to the initial fork snapshot, with the existing upstream version number. Later builds replace them; use the current local verification report for current hashes. No stable release or GitHub Pages firmware publication was performed. Build-Test publishes reviewable workflow artifacts separately from a stable release.
 
 The first fork push was published as commit `77736caa53b7ff4ab1df177e85aae6992d072059`. GitHub-hosted [Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785627), [Shell regressions](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785711) and [CodeQL](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785666) jobs were rejected before any steps began because of an account execution restriction. Remote CI acceptance is therefore outstanding; the completed checks in this report were run locally.
+
+## Exact-camera compatibility validation
+
+The subsequent 3007325.5 work added the native SD entry, single-FAT runtime layout, exact stock-binary profile, bounded network initialization, ports 88/89 stream metadata and update handling. The backup kit and its host verifier are public source tools; captured proprietary firmware, credentials, recordings and raw camera logs remain private. The following final local checks completed on 2026-10-12 after the cold-boot updater and single-FAT status-page fixes.
+
+| Check | Result |
+| --- | --- |
+| `make -C SOURCE nproc=8 all backup-kit release update` | Exit 0; default ARM/uClibc runtime, separate backup kit and both runtime archives. |
+| Full host regression suite | Exit 0; 263 cases in 25.039 seconds, with 36 optional ARM cases skipped and 227 executed. |
+| Full suite with ARM926 BusyBox and backup compiler/emulator settings | Exit 0; all 263 cases passed in 64.147 seconds, with no skips. |
+| Source and archive freshness | Exit 0; 145 source templates match the build; 695 full-archive and 647 update-archive regular files match it. |
+| Packaged ELF and execution checks | 119 ELF32 ARM files; 23 packaged program checks plus two static native-entry/BusyBox ARM926 checks passed. |
+| Generated backup kit | Static ARMv5TEJ launcher and BusyBox verified; optional ARM926 BusyBox applet smoke check and card checksums passed. |
+| Workflow and UI syntax | actionlint and JavaScript syntax checks passed. |
+
+| Current local archive | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,186,376 | `9e36ac710178c1c8ce2d37b2c163e832b02a7fe2049a707c64990fade79f3715` |
+| `update-1.03.2412-uclibc.tgz` | 45,764,626 | `44b154ea101837121cf8c881510848d186a47f4221bd7dcf42ad9e795a875753` |
+
+These hashes identify the local development artifacts for this validation; the upstream version number remains unchanged and no stable release was published. The [camera guide](camera-3007325.5.md#binary-evidence-and-acceptance) records the remaining physical runtime gates. Successful backup verification, fixtures and QEMU execution do not establish camera boot, decoded RTSP frames, ONVIF discovery, custom PTZ control or flash restoration.

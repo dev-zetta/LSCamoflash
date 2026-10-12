@@ -13,7 +13,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SBIN = ROOT / "SOURCE/src/sdcard/mmcblk0p2/HACK/sbin"
 INIT = (SBIN / "init.sh").read_text()
+CHECKSUMS = SBIN.parent / "etc/anyka_checksums.conf"
 CHECKSUM = "0123456789abcdef0123456789abcdef"
+SI_L25502_MD5 = "7c2a124cdd607ebef63fb66d063b6a87"
+SI_L25502_SHA256 = "d710cfe53a9e0098e4271db4fff2fc485e38acdaf78d965accaf2e516980534d"
 RUNTIME_SHELL = shlex.split(os.environ.get("CAMOFLASH_RUNTIME_SHELL", "/bin/sh"))
 
 
@@ -37,6 +40,7 @@ class RuntimeTests(unittest.TestCase):
             "sys_temp": self.base / "tmp",
             "sys_bin": self.base / "firmware/bin",
             "sys_usr_bin": self.base / "firmware/usr/bin",
+            "sys_usr_lib": self.base / "firmware/usr/lib",
             "sys_usr_local": self.base / "firmware/usr/local",
             "sys_config": self.base / "firmware/etc/config",
         }
@@ -48,11 +52,18 @@ class RuntimeTests(unittest.TestCase):
             "anyka_md5": CHECKSUM,
             "setup_lock_file": str(self.paths["sys_temp"] / "setup.lock"),
             "cp": "cp", "mv": "mv", "rm": "rm", "sed": "sed",
-            "find": "find", "head": "head", "md5sum": "md5sum", "awk": "awk", "touch": "touch", "grep": "grep",
+            "find": "find", "head": "head", "md5sum": "md5sum", "sha256sum": "sha256sum",
+            "awk": "awk", "touch": "touch", "grep": "grep", "cat": "cat",
             "mount": "true", "busybox_hack": str(self.paths["sd_bin"] / "busybox"),
         })
         self.write_executable(self.paths["sd_bin"] / "busybox",
-                              '#!/bin/sh\n[ "$1" = sh ] || exit 90\nshift\nexec ' + shlex.join(RUNTIME_SHELL) + ' "$@"\n')
+                              '#!/bin/sh\nif [ "$1" = md5sum ]; then\n'
+                              '  [ -z "$test_md5" ] || { printf "%s  %s\\n" "$test_md5" "$2"; exit 0; }\n'
+                              '  shift\nexec md5sum "$@"\nfi\n'
+                              'if [ "$1" = sha256sum ]; then\n'
+                              '  printf "%s  %s\\n" "$test_sha256" "$2"\n'
+                              '  exit "${test_sha256_status:-0}"\nfi\n'
+                              '[ "$1" = sh ] || exit 90\nshift\nexec ' + shlex.join(RUNTIME_SHELL) + ' "$@"\n')
         shutil.copy2(self.paths["sd_bin"] / "busybox", self.paths["sys_bin"] / "busybox")
         for name in ("anyka_ipc_wrapper.sh", "anyka_rtsp.sh"):
             shutil.copyfile(SBIN / name, self.paths["sd_sbin"] / name)
@@ -84,6 +95,7 @@ class RuntimeTests(unittest.TestCase):
 printf '%s\\n' '{label}' > "$sys_temp/launched"
 printf '%s\\n' "$LD_LIBRARY_PATH" > "$sys_temp/library"
 [ ! -f "$sys_temp/_ak39_factory.ini" ] || touch "$sys_temp/factory_at_launch"
+[ ! -f "$sys_temp/_ht_ap_mode.conf" ] || touch "$sys_temp/ap_at_launch"
 exit {status}
 ''')
 
@@ -94,16 +106,75 @@ exit {status}
         return subprocess.run([*RUNTIME_SHELL, str(SBIN / "anyka_ipc_wrapper.sh"), *args],
                               env=self.env, capture_output=True, text=True, timeout=3)
 
-    def snippet(self, start, end, prefix=""):
+    def snippet(self, start, end, prefix="", suffix=""):
         # Only selected blocks whose filesystem paths and commands are all
         # redirected above are run. Full init.sh would mutate the host.
         begin = INIT.index("\n", INIT.index(start)) + 1
         block = INIT[begin:INIT.index(end, begin)]
-        return subprocess.run([*RUNTIME_SHELL, "-c", prefix + block], env=self.env,
+        return subprocess.run([*RUNTIME_SHELL, "-c", prefix + block + suffix], env=self.env,
                               capture_output=True, text=True, timeout=3)
+
+    def profile(self, checksum, sha256=SI_L25502_SHA256, sha256_status=0, checksums=CHECKSUMS):
+        shutil.copyfile(self.stock, self.paths["sys_usr_bin"] / "anyka_ipc")
+        sha_command = Path(self.temp.name) / "profile-sha256"
+        self.write_executable(sha_command,
+                              '#!/bin/sh\nprintf "%s  %s\\n" "$test_sha256" "$1"\n'
+                              'exit "$test_sha256_status"\n')
+        self.env.update(anyka_md5=checksum, sha256sum=str(sha_command),
+                        test_sha256=sha256, test_sha256_status=str(sha256_status),
+                        anyka_checksums_conf=str(checksums))
+        fields = ("device_var", "device_model", "device_article", "device_firmware", "device_bundle",
+                  "device_soc", "device_cpu", "device_sensor", "device_has_motors", "device_motor_count",
+                  "device_has_ptz", "device_width", "device_height", "device_supported",
+                  "device_stock_binary_only", "use_ipc_autopatcher", "local_rtsp_only",
+                  "device_rtsp_available", "device_rtsp_main_port", "device_rtsp_main_path",
+                  "device_rtsp_sub_port", "device_rtsp_sub_path", "device_rtsp_main_width",
+                  "device_rtsp_main_height", "device_rtsp_sub_width", "device_rtsp_sub_height",
+                  "device_rtsp_main_codec", "device_rtsp_sub_codec")
+        output = "".join(f'printf "profile {field}=%s\\n" "${field}"\n' for field in fields)
+        load_begin = INIT.index("\n", INIT.index("# Load anyka checksums")) + 1
+        load_checksums = INIT[load_begin:INIT.index("# Repair Mode", load_begin)]
+        result = self.snippet("# Check, on which device we are on", 'echo "Device hostname is:',
+                              load_checksums, output)
+        profile = dict(line.removeprefix("profile ").split("=", 1)
+                       for line in result.stdout.splitlines() if line.startswith("profile "))
+        return result, profile
 
     def launched(self):
         return (self.paths["sys_temp"] / "launched").read_text().strip()
+
+    def test_init_network_accepts_completed_modes_and_replaces_stale_status(self):
+        marker = self.paths["sys_temp"] / "network.mode"
+        self.env.update(network_file=str(marker), sleep=str(self.sleep), kill="true")
+        for mode in ("tuya", "dhcp", "manual"):
+            with self.subTest(mode=mode):
+                marker.write_text("failed\n")
+                self.write_executable(self.paths["sd_sbin"] / "network.sh",
+                                      f'#!/bin/sh\nprintf "%s\\n" "{mode}" > "$network_file"\n')
+                result = self.snippet("# Initialize network", "# Breakout file", suffix='echo setup-reached\n')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("setup-reached", result.stdout)
+                self.assertEqual(marker.read_text(), mode + "\n")
+
+    def test_init_network_failure_stops_before_service_setup(self):
+        marker = self.paths["sys_temp"] / "network.mode"
+        self.env.update(network_file=str(marker), sleep=str(self.sleep), kill="true")
+        self.write_executable(self.paths["sd_sbin"] / "network.sh",
+                              '#!/bin/sh\nprintf "failed\\n" > "$network_file"\nexit 1\n')
+        result = self.snippet("# Initialize network", "# Breakout file", suffix='echo setup-reached\n')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Network initialization failed", result.stdout)
+        self.assertNotIn("setup-reached", result.stdout)
+
+    def test_init_network_missing_completion_is_bounded(self):
+        self.env.update(network_file=str(self.paths["sys_temp"] / "network.mode"),
+                        sleep=str(self.sleep), kill="true")
+        self.write_executable(self.paths["sd_sbin"] / "network.sh", '#!/bin/sh\nexit 1\n')
+        result = self.snippet("# Initialize network", "# Breakout file", suffix='echo setup-reached\n')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Network initialization timed out", result.stdout)
+        self.assertNotIn("setup-reached", result.stdout)
+        self.assertEqual((self.paths["sys_temp"] / "sleeps").read_text().splitlines(), ["1"] * 90)
 
     def test_local_factory_uses_stock_with_patches_installed_and_propagates_exit(self):
         self.binary(self.paths["sd_bin"] / "anyka_ipc_patched", "dynamic")
@@ -267,6 +338,249 @@ exit {status}
         result = self.snippet("# Prepare anyka ipc wrapper and configuration", 'echo -n "Enabling anyka_ipc_wrapper..."')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.paths["sys_temp"] / "_ht_hw_settings.ini").read_text(), self.hardware.read_text())
+
+    def test_si_l25502_exact_profile_keeps_stock_and_separates_motors_from_cli(self):
+        self.env.update(use_ipc_autopatcher="1", local_rtsp_only="")
+        result, profile = self.profile(SI_L25502_MD5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(profile, {
+            "device_var": "indoor_ptz_3007325_5_6_2863_125",
+            "device_model": "Smart PTZ Camera SI L25502", "device_article": "3007325.5",
+            "device_firmware": "6.2863.125.1348", "device_bundle": "HT_IPC286KS3_GMN_TUYA_AK3918EV330",
+            "device_soc": "AK3918EV330", "device_cpu": "ARM926 (ARMv5)", "device_sensor": "SC3332",
+            "device_has_motors": "1", "device_motor_count": "2", "device_has_ptz": "0",
+            "device_width": "2304", "device_height": "1296", "device_supported": "1",
+            "device_stock_binary_only": "1", "use_ipc_autopatcher": "0", "local_rtsp_only": "",
+            "device_rtsp_available": "0", "device_rtsp_main_port": "554", "device_rtsp_main_path": "/main_ch",
+            "device_rtsp_sub_port": "554", "device_rtsp_sub_path": "/sub_ch", "device_rtsp_main_width": "",
+            "device_rtsp_main_height": "", "device_rtsp_sub_width": "", "device_rtsp_sub_height": "",
+            "device_rtsp_main_codec": "H264", "device_rtsp_sub_codec": "H264",
+        })
+        self.assertEqual(self.hardware.read_text(), "[config]\ntilt_total_steps = 1234\nmain_width = 2304\n")
+        checksums = CHECKSUMS.read_text()
+        self.assertIn(f"indoor_ptz_3007325_5_6_2863_125_originl={SI_L25502_MD5}\n", checksums)
+        self.assertIn(f"indoor_ptz_3007325_5_6_2863_125_sha256={SI_L25502_SHA256}\n", checksums)
+        self.assertNotIn("indoor_ptz_3007325_5_6_2863_125_patched=", checksums)
+
+    def test_si_l25502_explicit_local_profile_publishes_stock_mode_two_stream_parameters(self):
+        self.env["local_rtsp_only"] = "1"
+        result, profile = self.profile(SI_L25502_MD5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(profile["device_rtsp_available"], "1")
+        self.assertEqual(profile["device_rtsp_main_port"], "88")
+        self.assertEqual(profile["device_rtsp_main_path"], "/videoMain")
+        self.assertEqual(profile["device_rtsp_sub_port"], "89")
+        self.assertEqual(profile["device_rtsp_sub_path"], "/videoSub")
+        self.assertEqual(profile["device_rtsp_main_width"], "2304")
+        self.assertEqual(profile["device_rtsp_main_height"], "1296")
+        self.assertEqual(profile["device_rtsp_sub_width"], "640")
+        self.assertEqual(profile["device_rtsp_sub_height"], "360")
+        self.assertEqual(profile["device_rtsp_main_codec"], "H265")
+        self.assertEqual(profile["device_rtsp_sub_codec"], "H264")
+        self.assertEqual((profile["device_width"], profile["device_height"]), ("2304", "1296"))
+
+    def test_si_l25502_profile_rejects_sha256_mismatch_or_unavailable_hash(self):
+        for digest in ("0" * 64, ""):
+            with self.subTest(sha256=digest):
+                result, profile = self.profile(SI_L25502_MD5, digest)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("SHA256 does not match", result.stdout)
+                self.assertEqual(profile, {})
+        result, profile = self.profile(SI_L25502_MD5, SI_L25502_SHA256, sha256_status=1)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Cannot hash", result.stdout)
+        self.assertEqual(profile, {})
+
+    def test_si_l25502_wrapper_uses_stock_despite_all_replacement_types(self):
+        for path, label in ((self.paths["sd_bin"] / "anyka_ipc_patched", "dynamic"),
+                            (self.paths["sd_patch"] / SI_L25502_MD5 / "bin/anyka_ipc_patched", "static patched"),
+                            (self.paths["sd_patch"] / SI_L25502_MD5 / "bin/anyka_ipc", "static stock")):
+            self.binary(path, label)
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        for local in ("", "1"):
+            with self.subTest(local_rtsp_only=local):
+                self.custom(f'export local_rtsp_only="{local}"\n')
+                result = self.wrapper(SI_L25502_MD5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.launched(), "stock")
+                self.assertEqual((self.paths["sys_temp"] / "library").read_text().strip(),
+                                 f"/lib:/usr/lib:{self.paths['sd_lib']}")
+                self.assertFalse((self.paths["sys_temp"] / "factory_at_launch").exists())
+                self.assertEqual((self.paths["sys_temp"] / "ap_at_launch").exists(), local == "1")
+
+    def test_si_l25502_wrapper_rechecks_stock_hash_before_launch(self):
+        self.custom('export local_rtsp_only="1"\n')
+        self.env["test_md5"] = SI_L25502_MD5
+        self.binary(self.paths["sd_bin"] / "anyka_ipc_patched", "dynamic")
+        for digest, status in (("0" * 64, 0), ("", 1), (SI_L25502_SHA256, 1)):
+            with self.subTest(sha256=digest, status=status):
+                self.env.update(test_sha256=digest, test_sha256_status=str(status))
+                result = self.wrapper(SI_L25502_MD5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse((self.paths["sys_temp"] / "launched").exists())
+                self.assertFalse((self.paths["sys_temp"] / "_ak39_factory.ini").exists())
+                self.assertFalse((self.paths["sys_temp"] / "_ht_ap_mode.conf").exists())
+
+    def test_si_l25502_profile_works_with_preserved_pre_profile_checksum_config(self):
+        legacy = self.paths["sd_etc"] / "old-checksums.conf"
+        legacy.write_text("ipc_xc_c323_originl=fd726ad2e0b6b5c2f1a1c41d350a5d0a\n")
+        result, profile = self.profile(SI_L25502_MD5, checksums=legacy)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(profile["device_article"], "3007325.5")
+        self.assertEqual(profile["device_stock_binary_only"], "1")
+        self.assertEqual(legacy.read_text(), "ipc_xc_c323_originl=fd726ad2e0b6b5c2f1a1c41d350a5d0a\n")
+
+    def test_si_l25502_owned_ap_marker_is_removed_when_local_mode_is_disabled(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        self.custom('export local_rtsp_only="1"\n')
+        result = self.wrapper(SI_L25502_MD5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.paths["sys_temp"] / "anyka_rtsp_ap.owned").exists())
+        self.assertTrue((self.paths["sys_temp"] / "ap_at_launch").exists())
+        (self.paths["sys_temp"] / "ap_at_launch").unlink()
+        self.custom('export local_rtsp_only=""\n')
+        result = self.wrapper(SI_L25502_MD5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.paths["sys_temp"] / "_ht_ap_mode.conf").exists())
+        self.assertFalse((self.paths["sys_temp"] / "anyka_rtsp_ap.owned").exists())
+        self.assertFalse((self.paths["sys_temp"] / "ap_at_launch").exists())
+
+    def test_si_l25502_external_ap_marker_is_preserved_across_mode_changes(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        marker = self.paths["sys_temp"] / "_ht_ap_mode.conf"
+        marker.write_text("external marker\n")
+        for local in ("1", ""):
+            with self.subTest(local_rtsp_only=local):
+                self.custom(f'export local_rtsp_only="{local}"\n')
+                result = self.wrapper(SI_L25502_MD5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(marker.read_text(), "external marker\n")
+                self.assertFalse((self.paths["sys_temp"] / "anyka_rtsp_ap.owned").exists())
+
+    def test_si_l25502_clears_owned_legacy_manufacturing_marker_but_rejects_unowned_one(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        self.custom('export local_rtsp_only="1"\n')
+        marker = self.paths["sys_temp"] / "_ak39_factory.ini"
+        owner = self.paths["sys_temp"] / "anyka_factory.owned"
+        marker.touch()
+        result = self.wrapper(SI_L25502_MD5)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Conflicting AK39", result.stderr)
+        self.assertTrue(marker.exists())
+        self.assertFalse((self.paths["sys_temp"] / "launched").exists())
+        owner.touch()
+        result = self.wrapper(SI_L25502_MD5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertFalse(owner.exists())
+        self.assertTrue((self.paths["sys_temp"] / "ap_at_launch").exists())
+        self.assertFalse((self.paths["sys_temp"] / "factory_at_launch").exists())
+
+    def test_si_l25502_rejects_manufacturing_force_options_and_wrong_md5_labels(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256)
+        for flag in ("ORIGIN", "PATCHED", "STATIC_PATCHED", "STATIC"):
+            with self.subTest(flag=flag):
+                self.custom(f'export FORCE_AK39_FACTORY_ON_{flag}="1"\n')
+                result = self.wrapper(SI_L25502_MD5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("manufacturing mode is unsupported", result.stderr)
+                self.assertFalse((self.paths["sys_temp"] / "launched").exists())
+                self.assertFalse((self.paths["sys_temp"] / "_ak39_factory.ini").exists())
+        self.custom('export local_rtsp_only="1"\n')
+        result = self.wrapper(CHECKSUM)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("MD5 does not match", result.stderr)
+        self.assertFalse((self.paths["sys_temp"] / "launched").exists())
+
+    def test_si_l25502_rtsp_entry_cannot_bypass_mode_or_binary_checks(self):
+        self.env.update(test_md5=SI_L25502_MD5, test_sha256=SI_L25502_SHA256, local_rtsp_only="1")
+        ap = self.paths["sys_temp"] / "_ht_ap_mode.conf"
+        factory = self.paths["sys_temp"] / "_ak39_factory.ini"
+        cases = (("missing AP", False, False, SI_L25502_MD5, SI_L25502_SHA256),
+                 ("factory conflict", True, True, SI_L25502_MD5, SI_L25502_SHA256),
+                 ("wrong MD5 label", True, False, CHECKSUM, SI_L25502_SHA256),
+                 ("wrong SHA", True, False, SI_L25502_MD5, "0" * 64))
+        for label, has_ap, has_factory, checksum, sha in cases:
+            with self.subTest(case=label):
+                ap.unlink(missing_ok=True)
+                factory.unlink(missing_ok=True)
+                if has_ap:
+                    ap.touch()
+                if has_factory:
+                    factory.touch()
+                self.env["test_sha256"] = sha
+                result = subprocess.run([*RUNTIME_SHELL, str(SBIN / "anyka_rtsp.sh"), checksum],
+                                        env=self.env, capture_output=True, text=True, timeout=3)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse((self.paths["sys_temp"] / "launched").exists())
+
+    def test_other_checksum_does_not_select_si_l25502_or_inherit_its_flags(self):
+        self.env.update(device_stock_binary_only="1", device_motor_count="2", device_article="3007325.5",
+                        use_ipc_autopatcher="1")
+        result, profile = self.profile("fd726ad2e0b6b5c2f1a1c41d350a5d0a")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(profile["device_var"], "ipc_xc_c323")
+        self.assertEqual(profile["device_has_ptz"], "1")
+        self.assertEqual(profile["device_has_motors"], "1")
+        self.assertEqual(profile["device_motor_count"], "")
+        self.assertEqual(profile["device_article"], "")
+        self.assertEqual(profile["device_stock_binary_only"], "0")
+        self.assertEqual(profile["use_ipc_autopatcher"], "1")
+        result, profile = self.profile(CHECKSUM)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(profile["device_supported"], "0")
+        self.assertEqual(profile["device_var"], "")
+        self.assertEqual(profile["device_stock_binary_only"], "0")
+
+    def test_stock_only_profile_invalidates_cached_patch_even_with_unchanged_stock(self):
+        current = self.paths["sys_usr_bin"] / "anyka_ipc"
+        shutil.copyfile(self.stock, current)
+        patched = self.paths["sd_bin"] / "anyka_ipc_patched"
+        self.binary(patched, "old patch")
+        self.env["device_stock_binary_only"] = "1"
+        original = self.stock.read_bytes()
+        result = self.snippet("# Check, whether anyka_ipc exists", "# Check, whether anyka_ipc_patched exists",
+                              INIT.split("# Compare function", 1)[1].split("# Create paths on sd", 1)[0])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.stock.read_bytes(), original)
+        self.assertFalse(patched.exists())
+
+    def test_stock_only_profile_does_not_run_autopatcher_even_when_enabled(self):
+        self.env.update(device_stock_binary_only="1", local_rtsp_only="", use_ipc_autopatcher="1")
+        digest = hashlib.md5(self.stock.read_bytes()).hexdigest()
+        (self.paths["sd_patch"] / f"{digest}.ips.gz").touch()
+        self.write_executable(self.paths["sd_sbin"] / "apply_ips_patch.sh",
+                              '#!/bin/sh\ntouch "$sys_temp/patcher_invoked"\nexit 99\n')
+        original = self.stock.read_bytes()
+        result = self.snippet("# Check, whether anyka_ipc_patched exists", "# Check, whether ssl exists")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.paths["sys_temp"] / "patcher_invoked").exists())
+        self.assertFalse((self.paths["sys_temp"] / "setup.lock").exists())
+        self.assertEqual(self.stock.read_bytes(), original)
+
+    def test_optional_legacy_library_is_preserved_when_firmware_does_not_ship_it(self):
+        cached = self.paths["sd_lib"] / "libavssdkbeta.so"
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                if existing:
+                    cached.write_bytes(b"existing library")
+                result = self.snippet("# Check, whether libavssdkbeta.so exists", "# Prepare and mount factory_cfg.ini")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(cached.exists(), existing)
+                if existing:
+                    self.assertEqual(cached.read_bytes(), b"existing library")
+
+    def test_legacy_library_copy_and_update_use_current_firmware_library(self):
+        current = self.paths["sys_usr_lib"] / "libavssdkbeta.so"
+        cached = self.paths["sd_lib"] / "libavssdkbeta.so"
+        for content in (b"stock library", b"updated library"):
+            with self.subTest(content=content):
+                current.write_bytes(content)
+                result = self.snippet("# Check, whether libavssdkbeta.so exists", "# Prepare and mount factory_cfg.ini",
+                                      INIT.split("# Compare function", 1)[1].split("# Create paths on sd", 1)[0])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(cached.read_bytes(), content)
 
     def test_local_mode_does_not_invoke_autopatcher(self):
         self.env.update(local_rtsp_only="1", use_ipc_autopatcher="1")

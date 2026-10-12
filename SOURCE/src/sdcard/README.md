@@ -2,7 +2,9 @@
 
 ## Introduction
 
-LSCamoflash requires an SD card with two partitions to function properly. The software has been updated to detect manipulations on the SD card, making it necessary to move the hack files to a separate partition (`mmcblk0p2`).
+The traditional LSCamoflash layout uses two FAT32 partitions, with the runtime on the second partition (`mmcblk0p2`). This fork also implements a single FAT32 card layout with `HACK/` at its root; see the [3007325.5 camera notes](https://github.com/dev-zetta/LSCamoflash/blob/main/docs/camera-3007325.5.md) for its current acceptance status. Always copy built card contents, which include the native `hostapd`, `busybox` and `bootstrap.sh` boot files. For a firmware backup alone, use the separate [backup procedure](https://github.com/dev-zetta/LSCamoflash/blob/main/docs/firmware-backup.md); its verified path does not require this runtime installation or destructive partitioning.
+
+Run the commands below from the generated `SOURCE/build/` directory or an unpacked full release root. The `mmcblk0p1/` and `mmcblk0p2/` copy paths are relative to that directory.
 
 ### Partition Requirements:
 - **Partition 1 (`mmcblk0p1`)**: At least **14GB**, formatted as **FAT32**.
@@ -10,7 +12,7 @@ LSCamoflash requires an SD card with two partitions to function properly. The so
 - **Partition 2 (`mmcblk0p2`)**: At least **1GB**, formatted as **FAT32**.
   - Stores the hack files.
 
-The `SDCARD` folder in this repository contains:
+The generated build directory or unpacked full release root contains:
 - `mmcblk0p1/` - Contents for the first partition.
 - `mmcblk0p2/` - Contents for the second partition.
 
@@ -117,8 +119,8 @@ If the scripts cannot be used, the SD card can be partitioned manually.
    exit
    ```
 10. **Copy files**:
-    - Copy the contents of `SDCARD/mmcblk0p1/` to the **first partition** (`mmcblk0p1`).
-    - Copy the contents of `SDCARD/mmcblk0p2/` to the **second partition** (`mmcblk0p2`).
+    - Copy the contents of `./mmcblk0p1/` to the **first partition** (`mmcblk0p1`).
+    - Copy the contents of `./mmcblk0p2/` to the **second partition** (`mmcblk0p2`).
 
 ### **Linux (Manual Method)**
 
@@ -160,8 +162,8 @@ If the scripts cannot be used, the SD card can be partitioned manually.
    sudo mount /dev/mmcblk0p1 /mnt/mmcblk0p1
    sudo mount /dev/mmcblk0p2 /mnt/mmcblk0p2
    
-   sudo cp -r SDCARD/mmcblk0p1/* /mnt/mmcblk0p1/
-   sudo cp -r SDCARD/mmcblk0p2/* /mnt/mmcblk0p2/
+   sudo cp -a ./mmcblk0p1/. /mnt/mmcblk0p1/
+   sudo cp -a ./mmcblk0p2/. /mnt/mmcblk0p2/
    
    sudo umount /mnt/mmcblk0p1
    sudo umount /mnt/mmcblk0p2

@@ -20,7 +20,7 @@ python3 tools/firmware-backup/build-kit.py --cc /path/to/arm-gcc --busybox /path
 
 `CC`, `BB`, and `READELF` provide the corresponding defaults. Optional `--qemu /path/to/qemu-arm` or `QEMU_ARM` checks BusyBox's required applets and execution with an ARM926 CPU. The builder always checks that both binaries are static ARMv5TE/ARMv5TEJ EABI5 executables without the hard-float ABI. It never copies files onto a card. Rebuilding replaces only a recognized output with the exact generated inventory; additional files cause refusal.
 
-The default output is `SOURCE/backup-kit/`, separate from the runtime build tree. It contains `card/`, the host verifier, this guide, a manifest, and checksums. Only the contents of `card/` belong at the SD root. Use the [model-specific backup procedure](../../docs/firmware-backup.md) before staging or booting the kit. Do not put raw partition images or firmware update files at the SD root. The output contains no private firmware, credentials, or prebuilt binaries from this repository.
+The default output is `SOURCE/backup-kit/`, separate from the runtime build tree. It contains `card/`, the host verifier, this guide, a manifest, and checksums. Only the contents of `card/` belong at the SD root. Use the [model-specific backup procedure](https://github.com/dev-zetta/LSCamoflash/blob/main/docs/firmware-backup.md) before staging or booting the kit. Do not put raw partition images or firmware update files at the SD root. The output contains no private firmware, credentials, or prebuilt binaries from this repository.
 
 ## Capture and verify
 

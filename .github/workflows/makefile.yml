@@ -3,10 +3,10 @@ name: Build-Test
 on:
   push:
     branches: [main]
-    paths: ['SOURCE/**', '.github/workflows/makefile.yml']
+    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tests/**', '.github/workflows/makefile.yml']
   pull_request:
     branches: [main]
-    paths: ['SOURCE/**', '.github/workflows/makefile.yml']
+    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tests/**', '.github/workflows/makefile.yml']
   workflow_dispatch:
 
 permissions:
@@ -19,22 +19,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y build-essential flex bison gsoap binutils make automake autoconf autoconf-archive qemu-user
+        run: sudo apt-get update && sudo apt-get install -y build-essential busybox fdisk flex bison gsoap binutils make cmake python3 automake autoconf autoconf-archive qemu-user
       - name: Build default ARM uclibc packages and archives
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .local/logs
           cd SOURCE
-          make nproc=8 all release update 2>&1 | tee ../.local/logs/build.log
+          make nproc=8 all backup-kit release update 2>&1 | tee ../.local/logs/build.log
       - name: Verify packaged ARM programs and archives
         run: python3 SOURCE/src/bin/verify-build.py --output .local/logs/artifact-verification.json
-      - name: Run regressions with target BusyBox ash
+      - name: Run regressions with ARM926 BusyBox ash and backup tools
         env:
-          CAMOFLASH_RUNTIME_SHELL: qemu-arm SOURCE/build/mmcblk0p2/HACK/bin/busybox ash
-        run: |
-          python3 -m unittest discover -s tests -p test_runtime.py -v
-          python3 -m unittest discover -s tests -p test_network_motor.py -v
+          CAMOFLASH_RUNTIME_SHELL: qemu-arm -cpu arm926 ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash
+          BACKUP_ARM_CC: ${{ github.workspace }}/SOURCE/toolchain/uclibc/bin/arm-buildroot-linux-uclibcgnueabi-gcc
+          BACKUP_ARM_BUSYBOX: ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox
+          BACKUP_QEMU: qemu-arm
+        run: python3 -m unittest discover -s tests -v
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -50,4 +51,10 @@ jobs:
           path: |
             SOURCE/LSCamoflash-*-uclibc.tar.gz
             SOURCE/update-*-uclibc.tgz
+          if-no-files-found: error
+      - name: Upload separate firmware backup kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: LSCamoflash-nor-backup-kit
+          path: SOURCE/backup-kit/
           if-no-files-found: error

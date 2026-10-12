@@ -1105,7 +1105,15 @@ $(BUILD_DIR)/install.ps1: $(SDCARD_FILES) $(SRC_DIR)/contrib/motor/motor.c $(SRC
 	@rm -rf $(BUILD_HACK)/lib/modules/$(KERNEL_VERSION)/source >/dev/null 2>&1 || true
 	@touch $@
 	
-# Separate backup kit: root boot markers must not be mixed with the runtime.
+# A native hook works on stock launchers that cannot execute a shell payload.
+# Keep it static: this entry runs before the SD library overlay is available.
+$(BUILD_DIR)/mmcblk0p1/hostapd: $(SRC_DIR)/contrib/bootstrap/hostapd.c $(BUILD_DIR)/install.ps1
+	@$(CC) -Os -std=c99 -Wall -Wextra -Werror -march=armv5te -mtune=arm926ej-s -mfloat-abi=soft -marm -static $< -o $@
+
+$(BUILD_DIR)/mmcblk0p1/busybox: $(STAGE_HACK)/bin/busybox $(BUILD_DIR)/install.ps1
+	@cp $(STAGE_HACK)/bin/busybox $@
+
+# Separate kit: its root boot markers must never be mixed with the runtime.
 .PHONY: backup-kit
 backup-kit: download toolchain packages $(STAGING_DIR) busybox
 	@python3 $(ROOT_DIR)/../tools/firmware-backup/build-kit.py --cc "$(CC)" --busybox "$(STAGE_HACK)/bin/busybox" --output "$(ROOT_DIR)/backup-kit"
@@ -1282,7 +1290,7 @@ build: staging host $(BUILD_DIR)/install.ps1 $(BUILD_HACK)/bin/radare2 $(BUILD_H
        $(BUILD_HACK)/bin/strace $(BUILD_HACK)/bin/sqlite3 $(BUILD_HACK)/bin/sqlcipher $(BUILD_HACK)/bin/pcap-config $(BUILD_HACK)/bin/openssl $(BUILD_HACK)/sbin/msmtpd $(BUILD_HACK)/bin/msmtp $(BUILD_HACK)/bin/joe \
        $(BUILD_HACK)/bin/curl-config $(BUILD_HACK)/bin/curl $(BUILD_HACK)/bin/busybox $(BUILD_HACK)/bin/mosquitto_rr $(BUILD_HACK)/bin/mosquitto_pub $(BUILD_HACK)/bin/mosquitto_sub $(BUILD_HACK)/bin/mosquitto_passwd \
        $(BUILD_HACK)/sbin/mosquitto $(BUILD_HACK)/bin/php $(BUILD_HACK)/bin/php-cgi $(BUILD_HACK)/bin/phpize $(BUILD_HACK)/bin/python $(BUILD_HACK)/bin/pydoc \
-       $(BUILD_HACK)/bin/idle $(BUILD_HACK)/bin/pip $(BUILD_HACK)/etc/version.txt $(BUILD_DIR)/LICENSE.md
+       $(BUILD_HACK)/bin/idle $(BUILD_HACK)/bin/pip $(BUILD_HACK)/etc/version.txt $(BUILD_DIR)/LICENSE.md $(BUILD_DIR)/mmcblk0p1/hostapd $(BUILD_DIR)/mmcblk0p1/busybox
 	
 build-clean:
 	@rm -rf $(BUILD_DIR)

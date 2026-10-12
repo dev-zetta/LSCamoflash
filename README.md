@@ -2,6 +2,8 @@
 
 This fork integrates upstream PRs #5, #6, #8 and #9. See the [integration and camera compatibility notes](docs/integration.md) for issue status, local RTSP setup and validation. The download links below are upstream builds and do not include this fork's changes.
 
+The fork also provides a [documented stock firmware backup kit](docs/firmware-backup.md) and an [experimental runtime profile for LSC Smart PTZ 3007325.5, firmware 6.2863.125.1348](docs/camera-3007325.5.md). The backup path has been verified on this camera; runtime streaming and custom PTZ control require separate device testing.
+
 LSCamoflash is a modified firmware package for specific IP cameras that provides additional features and improvements.
 
 - [LSCamoflash Github-Page](https://bunkerschild.github.io/LSCamoflash/)
@@ -100,6 +102,9 @@ The following packages are required for the build process:
 - `make`: Build automation tool
 - `automake`: Tool for generating Makefiles
 - `autoconf`: Tool for configuring software packages
+- `autoconf-archive`: Additional Autoconf macros used by bundled packages
+- `cmake`: Build configuration for cJSON, MQTT and ONVIF components
+- `python3`: Source helpers and artifact verification (Python 3.11 or later; standalone backup tools support 3.9 or later)
 
 **Note:** Ensure all dependencies are installed to ensure a smooth build process.
 

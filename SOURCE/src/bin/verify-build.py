@@ -42,6 +42,9 @@ RUNTIME_CHECKS = [
     ('bin/motor', [], {1}),
 ]
 REQUIRED_ARCHIVE_FILES = {
+    'mmcblk0p1/hostapd',
+    'mmcblk0p1/bootstrap.sh',
+    'mmcblk0p1/busybox',
     'mmcblk0p2/HACK/bin/busybox',
     'mmcblk0p2/HACK/bin/php',
     'mmcblk0p2/HACK/sbin/onvif_srvd',
@@ -98,6 +101,32 @@ def run_runtime_checks(hack, qemu):
         if relative == 'bin/sqlcipher' and arguments[0] == ':memory:' and '4.5.5' not in result.stdout:
             raise RuntimeError(f'SQLCipher extension was not enabled: {record}')
     return results
+
+
+def check_bootstrap(build, qemu):
+    """The early hook must run on ARM926 without an SD library overlay."""
+    for name in ('hostapd', 'busybox'):
+        path = build / 'mmcblk0p1' / name
+        data = path.read_bytes()
+        if len(data) < 52 or data[:7] != b'\x7fELF\x01\x01\x01':
+            raise ValueError(f'Native bootstrap is not an ELF32 LE executable: {name}')
+        fields = struct.unpack_from('<HHIIIIIHHHHHH', data, 16)
+        kind, machine, _, _, phoff, _, flags, _, phsize, phcount, _, _, _ = fields
+        if kind != 2 or machine != 40 or flags & 0x400 or flags & 0xff000000 != 0x05000000:
+            raise ValueError(f'Native bootstrap is not ARM EABI5 soft-float: {name}')
+        if not phcount or phsize < 32 or phoff + phsize * phcount > len(data):
+            raise ValueError(f'Invalid bootstrap program headers: {name}')
+        for number in range(phcount):
+            if struct.unpack_from('<I', data, phoff + number * phsize)[0] in (2, 3):
+                raise ValueError(f'Native bootstrap requires dynamic libraries: {name}')
+    # Oversized arguments force a rejection before checking or using any mount.
+    native = subprocess.run([qemu, '-cpu', 'arm926', str(build / 'mmcblk0p1/hostapd'), *(['probe'] * 129)],
+                            capture_output=True, text=True, timeout=10)
+    busybox = subprocess.run([qemu, '-cpu', 'arm926', str(build / 'mmcblk0p1/busybox'), 'echo', 'bootstrap-arm926-ok'],
+                             capture_output=True, text=True, timeout=10)
+    if native.returncode != 2 or busybox.returncode != 0 or busybox.stdout.strip() != 'bootstrap-arm926-ok':
+        raise RuntimeError('Packaged native bootstrap did not execute safely on ARM926')
+    return {'static_arm_eabi5': True, 'arm926_checks': 2, 'native_rejection_exit': native.returncode}
 
 
 def file_digest(path):
@@ -173,12 +202,13 @@ def main():
     source_files = check_sources(source, build)
     elfs = scan_elfs(build)
     runtime = run_runtime_checks(build / 'mmcblk0p2/HACK', args.qemu)
+    bootstrap = check_bootstrap(build, args.qemu)
     archives = [
         check_archive(args.archive_dir / f'LSCamoflash-{version}-uclibc.tar.gz', False, build),
         check_archive(args.archive_dir / f'update-{version}-uclibc.tgz', True, build),
     ]
     summary = dict(source_files_verified=source_files, version_verified=True,
-                   elf_count=len(elfs), runtime_checks=len(runtime), archives=archives)
+                   elf_count=len(elfs), runtime_checks=len(runtime), bootstrap=bootstrap, archives=archives)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(dict(summary, elfs=elfs, runtime=runtime), indent=2) + '\n')

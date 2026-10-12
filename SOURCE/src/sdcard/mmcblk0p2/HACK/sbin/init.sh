@@ -27,7 +27,11 @@ export setup_lock_file="/tmp/setup.lock"
 [ -n "$commands_conf" ] && . $commands_conf && echo "Command variables loaded from: $commands_conf" || exit 1
 
 # Load anyka checksums
-[ -n "$anyka_checksums_conf" ] && . $anyka_checksums_conf && echo "Anyka checksums loaded from: $anyka_checksums_conf" || exit 1
+[ -n "$anyka_checksums_conf" ] && . "$anyka_checksums_conf" && echo "Anyka checksums loaded from: $anyka_checksums_conf" || exit 1
+# Updates preserve camera configuration, including checksum files from older
+# releases. Keep the identity for this stock-only profile available there too.
+indoor_ptz_3007325_5_6_2863_125_originl=${indoor_ptz_3007325_5_6_2863_125_originl:-7c2a124cdd607ebef63fb66d063b6a87}
+indoor_ptz_3007325_5_6_2863_125_sha256=${indoor_ptz_3007325_5_6_2863_125_sha256:-d710cfe53a9e0098e4271db4fff2fc485e38acdaf78d965accaf2e516980534d}
 
 # Repair Mode: Check for /tmp/sd/INJECT directory with recovery archives
 if [ -d "$sd_inject" ]; then
@@ -78,9 +82,24 @@ if [ -n "$system_hostname" ]; then
 fi
 
 # Initialize network
-$sd_sbin/network.sh & while [ ! -f $network_file ]; do
+[ -n "$network_file" ] || { echo "ERROR: Missing network status path"; exit 1; }
+$rm -f "$network_file" || exit 1
+"$busybox_hack" sh "$sd_sbin/network.sh" &
+network_pid=$!
+network_wait=0
+while [ ! -f "$network_file" ]; do
+	if [ "$network_wait" -ge 90 ]; then
+		echo "ERROR: Network initialization timed out; stopping service setup"
+		$kill "$network_pid" >/dev/null 2>&1 || true
+		exit 1
+	fi
 	$sleep 1
+	network_wait=$((network_wait + 1))
 done
+case "$($cat "$network_file")" in
+	tuya|dhcp|manual) ;;
+	*) echo "ERROR: Network initialization failed; stopping service setup"; exit 1 ;;
+esac
 
 # Breakout file
 breakout_file="$sys_temp/hostapd.break"
@@ -92,6 +111,26 @@ export loop_device="/dev/loop0"
 export device_version=`$cat $sd_etc/version.txt`
 
 # Check, on which device we are on
+export device_stock_binary_only=0
+export device_has_motors=""
+export device_motor_count=""
+export device_article=""
+export device_firmware=""
+export device_bundle=""
+export device_soc=""
+export device_cpu=""
+export device_sensor=""
+export device_rtsp_available=1
+export device_rtsp_main_port=554
+export device_rtsp_main_path="/main_ch"
+export device_rtsp_sub_port=554
+export device_rtsp_sub_path="/sub_ch"
+export device_rtsp_main_width=""
+export device_rtsp_main_height=""
+export device_rtsp_sub_width=""
+export device_rtsp_sub_height=""
+export device_rtsp_main_codec="H264"
+export device_rtsp_sub_codec="H264"
 if [ -f "$sys_usr_bin/anyka_ipc" ]; then	
 	case $anyka_md5 in
         	$old_ptz_1080p_originl|$old_ptz_1080p_patched)
@@ -171,6 +210,55 @@ if [ -f "$sys_usr_bin/anyka_ipc" ]; then
         		export device_outdoor_use=0
         		export device_supported=1
 	        ;;
+		$indoor_ptz_3007325_5_6_2863_125_originl)
+			# This exact recovered build has a different stock runtime from older
+			# 1296p cameras. Verify it before selecting its stock-only profile.
+			stock_sha256=$($sha256sum "$sys_usr_bin/anyka_ipc") || {
+				echo "ERROR: Cannot hash the stock 3007325.5 binary"
+				exit 1
+			}
+			stock_sha256=$(printf '%s\n' "$stock_sha256" | $awk '{print $1}')
+			if [ "$stock_sha256" != "$indoor_ptz_3007325_5_6_2863_125_sha256" ]; then
+				echo "ERROR: Stock binary SHA256 does not match the 3007325.5 firmware profile"
+				exit 1
+			fi
+			export device_var="indoor_ptz_3007325_5_6_2863_125"
+			export device_manufacturer="LSC"
+			export device_model="Smart PTZ Camera SI L25502"
+			export device_article="3007325.5"
+			export device_firmware="6.2863.125.1348"
+			export device_bundle="HT_IPC286KS3_GMN_TUYA_AK3918EV330"
+			export device_soc="AK3918EV330"
+			export device_cpu="ARM926 (ARMv5)"
+			export device_sensor="SC3332"
+			export device_deprecated=0
+			export device_has_motors=1
+			export device_motor_count=2
+			# device_has_ptz enables toolkit PTZ commands/ONVIF, not motor presence.
+			# The motor CLI for this build has not been verified.
+			export device_has_ptz=0
+			export device_height=1296
+			export device_width=2304
+			export device_outdoor_use=0
+			export device_supported=1
+			export device_stock_binary_only=1
+			export use_ipc_autopatcher=0
+			export device_rtsp_available=0
+			if [ "$local_rtsp_only" = "1" ]; then
+				export device_rtsp_available=1
+				export device_rtsp_main_port=88
+				export device_rtsp_main_path="/videoMain"
+				export device_rtsp_sub_port=89
+				export device_rtsp_sub_path="/videoSub"
+				# Mode 2 reads the active hardware configuration, not factory_cfg.ini.
+				export device_rtsp_main_width=2304
+				export device_rtsp_main_height=1296
+				export device_rtsp_sub_width=640
+				export device_rtsp_sub_height=360
+				export device_rtsp_main_codec="H265"
+				export device_rtsp_sub_codec="H264"
+			fi
+		;;
 	        *)
 			echo "WARNING: Unknown firmware profile; management services can still start"
 			echo "No binary patch is validated for checksum $anyka_md5; factory RTSP is opt-in with local_rtsp_only=1"
@@ -190,13 +278,20 @@ else
 	exit 1
 fi
 
+# Older profiles used this flag for both motor presence and toolkit control.
+[ -n "$device_has_motors" ] || export device_has_motors="$device_has_ptz"
+
 echo "Device hostname is: $system_hostname"
 echo "Device MAC is: $device_mac"
 echo "Device UID: $device_uid"
 echo "Device manufacturer: $device_manufacturer"
 echo "Device model: $device_model"
 echo "Device is deprecated: $device_deprecated"
-echo "Device has PTZ: $device_has_ptz"
+echo "Device has motor hardware: $device_has_motors"
+[ -z "$device_motor_count" ] || echo "Device motor count: $device_motor_count"
+echo "Toolkit PTZ control available: $device_has_ptz"
+[ -z "$device_article" ] || echo "Device article: $device_article"
+[ -z "$device_firmware" ] || echo "Stock firmware build: $device_firmware"
 echo "Device resolution height: $device_height px"
 echo "Device resolution width: $device_width px"
 echo "Device can be used outdoor: $device_outdoor_use"
@@ -401,6 +496,10 @@ for i in 1 2 3 4 5 6 7; do
 done
 
 # Check, whether anyka_ipc exists
+# A previously generated binary is not valid for a stock-only firmware profile.
+if [ "${device_stock_binary_only:-0}" = "1" ]; then
+	$rm -f "$sd_bin/anyka_ipc_patched"
+fi
 if [ ! -e "$sd_bin/anyka_ipc" ]; then
 	echo -n "Creating copy of firmwares anyka_ipc..." 
 	$rm -f "$sd_bin/anyka_ipc_patched"
@@ -415,7 +514,7 @@ if [ -e "$sd_bin/anyka_ipc" ]; then
 fi
 
 # Check, whether anyka_ipc_patched exists and if there are patches
-if [ ! -e "$sd_bin/anyka_ipc_patched" -a -e "$sd_bin/anyka_ipc" -a "$use_ipc_autopatcher" = "1" -a "$local_rtsp_only" != "1" ]; then
+if [ ! -e "$sd_bin/anyka_ipc_patched" -a -e "$sd_bin/anyka_ipc" -a "$use_ipc_autopatcher" = "1" -a "$local_rtsp_only" != "1" -a "${device_stock_binary_only:-0}" != "1" ]; then
 	anyka_checksum=`$md5sum -b "$sd_bin/anyka_ipc" | $awk '{print $1}'`
 	patch_file=`$find "$sd_patch" -type f -name "$anyka_checksum.ips.gz" | $head -n 1`
 	
@@ -507,12 +606,14 @@ if [ -e $sd_config/_ht_sw_settings.ini ]; then
 fi
 
 # Check, whether libavssdkbeta.so exists
-if [ ! -e $sd_lib/libavssdkbeta.so ]; then
-	echo -n "Creating copy of libabsdkbeta.so file..."
-	$cp $sys_usr_lib/libavssdkbeta.so $sd_lib && echo "done" || echo "failed"
-fi
-if [ -e $sd_lib/libavssdkbeta.so ]; then
-	compare $sys_usr_lib/libavssdkbeta.so $sd_lib/libavssdkbeta.so || $cp $sys_usr_lib/libavssdkbeta.so $sd_lib 
+if [ -f "$sys_usr_lib/libavssdkbeta.so" ]; then
+	if [ ! -e "$sd_lib/libavssdkbeta.so" ]; then
+		echo -n "Creating copy of libavssdkbeta.so file..."
+		$cp "$sys_usr_lib/libavssdkbeta.so" "$sd_lib" && echo "done" || echo "failed"
+	else
+		compare "$sys_usr_lib/libavssdkbeta.so" "$sd_lib/libavssdkbeta.so" || \
+			$cp "$sys_usr_lib/libavssdkbeta.so" "$sd_lib"
+	fi
 fi
 
 # Prepare and mount factory_cfg.ini
