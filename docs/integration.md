@@ -81,3 +81,5 @@ The first build attempt failed because the bundled toolchains put an older Bison
 | `update-1.03.2412-uclibc.tgz` | 44,038,068 | `0d44aaec20f4666ddef981bfe45ca365cde8aae4fd34ff318d725858e2d19ede` |
 
 These are development artifacts for this fork, with the existing upstream version number. No stable release or GitHub Pages firmware publication was performed. Build-Test publishes reviewable workflow artifacts separately from a stable release.
+
+The first fork push was published as commit `77736caa53b7ff4ab1df177e85aae6992d072059`. GitHub-hosted [Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785627), [Shell regressions](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785711) and [CodeQL](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785666) jobs were rejected before any steps began because of an account execution restriction. Remote CI acceptance is therefore outstanding; the completed checks in this report were run locally.
