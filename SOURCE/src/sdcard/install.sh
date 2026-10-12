@@ -1,136 +1,193 @@
 #!/bin/bash
 
-use_sd_config=0
+# This installer can be sourced for offline tests; only main accesses devices.
+is_block_device() {
+	[[ -b "$1" ]]
+}
 
-if [ "$1" = "-u" -o "$1" = "--use-sd-config" ]; then
-	use_sd_config=1
-fi
+die() {
+	printf 'Fehler: %s\n' "$*" >&2
+	exit 1
+}
 
-echo "LSCamoflash SD-Karten Partitionierungsskript"
-[ "$use_sd_config" = "1" ] && echo "Konfigurationsdateien werden von der SD uebernommen, sofern vorhanden."
-echo "ACHTUNG: NUR WECHSELMEDIEN WERDEN ANGEZEIGT! ALLE DATEN AUF DEM GEWAEHLTEN DATENTRAEGER WERDEN GELOESCHT!"
-echo "ABBRUCH MIT CTRL+C"
-sleep 5
-
-# Wechselmedien auflisten
-echo "Verfuegbare Wechselmedien:"
-lsblk -o NAME,MODEL,SIZE,TYPE | grep "disk"
-
-# Benutzer nach der SD-Karte fragen
-read -p "Gib den Geraetenamen deiner SD-Karte ein (z.B. mmcblk0 oder sdb): " disk
-
-# Überpruefen, ob das Geraet existiert
-if [ ! -b "/dev/$disk" ]; then
-    echo "Fehler: Das Geraet /dev/$disk existiert nicht!"
-    exit 1
-fi
-
-# Sicherheitspruefung: Ist es ein Wechselmedium? (RM=1, nicht ROTA:
-# moderne interne SSDs sind ROTA=0 und wuerden die alte Pruefung faelschlich bestehen)
-if [ "$(lsblk -dno RM /dev/$disk 2>/dev/null)" != "1" ]; then
-    echo "Fehler: Der gewaehlte Datentraeger ist KEIN Wechselmedium! Abbruch."
-    exit 1
-fi
-
-# Partitions-Namensschema bestimmen: mmcblk0/nvme (endet auf Ziffer) -> "p"-Trenner,
-# sd*/hd*/vd* -> kein Trenner (z.B. sdb -> sdb1, mmcblk0 -> mmcblk0p1)
-case "$disk" in
-	*[0-9]) part="${disk}p" ;;
-	*)      part="${disk}" ;;
-esac
-
-# Mount-Punkte erstellen
-mount1=$(mktemp -d)
-mount2=$(mktemp -d)
-
-if [ "$use_sd_config" = "1" ]; then
-	mount /dev/${part}1 $mount1 >/dev/null 2>&1
-	mount /dev/${part}2 $mount2 >/dev/null 2>&1
-	
-	for m in $mount1 $mount2; do
-		if [ -f "$m/HACK/etc/hack_custom.conf" ]; then
-			echo "Kopiere Konfiguration von SD Karte..."
-			cp -f $m/HACK/etc/hack_custom.conf hack_custom.conf >/dev/null 2>&1
-			cp -f $m/HACK/etc/config/passwd passwd >/dev/null 2>&1
-			cp -f $m/HACK/etc/config/shadow shadow >/dev/null 2>&1
-			cp -f $m/HACK/var/spool/cron/crontabs/root crontab >/dev/null 2>&1
+cleanup() {
+	local failed=0 point
+	[[ -n "${work_dir:-}" ]] || return 0
+	for point in "$mount2" "$mount1"; do
+		if mountpoint -q -- "$point"; then
+			if ! umount -- "$point"; then
+				printf 'Fehler: %s konnte nicht ausgehaengt werden.\n' "$point" >&2
+				failed=1
+			fi
 		fi
 	done
-	
-	umount $mount2 >/dev/null 2>&1
-	umount $mount1 >/dev/null 2>&1
+	# Never recursively delete a directory that might still contain a mounted card.
+	if (( failed == 0 )); then
+		rm -f -- "$backup/hack_custom.conf" "$backup/passwd" "$backup/shadow" "$backup/crontab"
+		rmdir -- "$mount1" "$mount2" "$backup" "$work_dir" 2>/dev/null || true
+	fi
+	return "$failed"
+}
+
+unmount_device() {
+	local status=0
+	findmnt -rn -S "$1" >/dev/null || status=$?
+	case "$status" in
+		0) umount --all-targets -- "$1" ;;
+		1) return 0 ;;
+		*) die "Mount-Status fuer $1 konnte nicht ermittelt werden." ;;
+	esac
+}
+
+# Reserve the initial alignment gap as well as a full 1 GiB second partition.
+partition_layout() {
+	local bytes="$1" mib=1048576 p1mib
+	[[ "$bytes" =~ ^[0-9]+$ && ${#bytes} -lt 16 ]] || die "Ungueltige Datentraegergroesse."
+	bytes=$(( 10#$bytes ))
+	p1mib=$(( bytes / mib - 1024 - 1 ))
+	(( p1mib >= 64 )) || die "Datentraeger ist fuer zwei FAT32-Partitionen zu klein."
+	printf 'label: dos\nstart=1MiB, size=%sMiB, type=0c\nsize=1024MiB, type=0c\n' "$p1mib"
+}
+
+main() {
+	set -Eeuo pipefail
+	local use_sd_config=0 command disk device info kname kind removable readonly extra
+	local name rm type details layout children child fstype confirmation source destination part
+	local script_dir
+	work_dir= mount1= mount2= backup=
+	trap 'status=$?; trap - EXIT; cleanup || status=1; if (( status != 0 )); then printf "Installation abgebrochen (Status %s).\n" "$status" >&2; fi; exit "$status"' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+
+	while (( $# )); do
+		case "$1" in
+			-u|--use-sd-config) use_sd_config=1 ;;
+			-h|--help) printf 'Aufruf: %s [-u|--use-sd-config]\n' "$0"; return 0 ;;
+			*) die "Unbekanntes Argument: $1" ;;
+		esac
+		shift
+	done
+	[[ "$(id -u)" == 0 ]] || die "Bitte mit root-Rechten (sudo) starten."
+	for command in lsblk blockdev findmnt mountpoint umount wipefs sfdisk partprobe udevadm mkfs.vfat mount cp sync mktemp mkdir rm rmdir dirname; do
+		command -v "$command" >/dev/null || die "Benoetigtes Programm fehlt: $command"
+	done
+	script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+	[[ -d "$script_dir/mmcblk0p1" && -d "$script_dir/mmcblk0p2/HACK/etc" ]] || die "Installationsdateien fehlen neben install.sh."
+
+	printf 'LSCamoflash SD-Karten Partitionierungsskript\n'
+	printf 'ACHTUNG: ALLE DATEN AUF DEM GEWAEHLTEN DATENTRAEGER WERDEN GELOESCHT!\n'
+	printf 'Verfuegbare Wechselmedien:\n'
+	info=$(lsblk -dnro NAME,RM,TYPE,MODEL,SIZE)
+	while read -r name rm type details; do
+		if [[ "$rm" == 1 && "$type" == disk ]]; then
+			printf '  %s %s\n' "$name" "$details"
+		fi
+	done <<< "$info"
+	read -r -p 'Gib den Geraetenamen deiner SD-Karte ein (z.B. mmcblk0 oder sdb): ' disk
+	# Accept a single kernel device name, never a path, option, symlink, or glob.
+	[[ "$disk" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || die "Bitte genau einen Geraetenamen eingeben."
+	device="/dev/$disk"
+	[[ ! -L "$device" ]] && is_block_device "$device" || die "$device ist kein eindeutiges Blockgeraet."
+	info=$(lsblk -dnro KNAME,TYPE,RM,RO "$device")
+	[[ "$info" != *$'\n'* ]] || die "Mehrdeutiger Datentraeger."
+	read -r kname kind removable readonly extra <<< "$info"
+	[[ "$kname" == "$disk" && "$kind" == disk && "$removable" == 1 && "$readonly" == 0 && -z "$extra" ]] || die "Nur ganze, beschreibbare Wechselmedien (RM=1) sind erlaubt."
+
+	case "$disk" in
+		*[0-9]) part="${device}p" ;;
+		*) part="$device" ;;
+	esac
+	layout=$(partition_layout "$(blockdev --getsize64 "$device")")
+	children=$(lsblk -nrpo NAME,TYPE,FSTYPE "$device")
+	# Refuse devices with active layered users (LVM, RAID, dm-crypt) or swap.
+	while read -r child kind fstype extra; do
+		[[ "$child" == /dev/* && -z "$extra" && "$fstype" != swap ]] || die "Unerwartete oder aktive Nutzung von $device."
+		[[ "$kind" == part || ( "$child" == "$device" && "$kind" == disk ) ]] || die "Aktive Geraeteabhaengigkeit auf $device."
+	done <<< "$children"
+	read -r -p "Zum Loeschen von $device den Geraetenamen '$disk' erneut eingeben: " confirmation
+	[[ "$confirmation" == "$disk" ]] || die "Datentraeger nicht bestaetigt."
+	while read -r child kind fstype extra; do
+		unmount_device "$child"
+	done <<< "$children"
+
+	work_dir=$(mktemp -d)
+	mount1="$work_dir/partition1"
+	mount2="$work_dir/partition2"
+	backup="$work_dir/config"
+	mkdir -- "$mount1" "$mount2" "$backup"
+	if (( use_sd_config )); then
+		for source in "${part}1" "${part}2"; do
+			if is_block_device "$source"; then
+				mount -o ro -- "$source" "$mount1"
+				for destination in hack_custom.conf passwd shadow crontab; do
+					case "$destination" in
+						hack_custom.conf) name=HACK/etc/hack_custom.conf ;;
+						passwd|shadow) name="HACK/etc/config/$destination" ;;
+						crontab) name=HACK/var/spool/cron/crontabs/root ;;
+					esac
+					if [[ -f "$mount1/$name" ]]; then
+						cp -f -- "$mount1/$name" "$backup/$destination"
+					fi
+				done
+				umount -- "$mount1"
+			fi
+		done
+	fi
+
+	printf 'Loesche vorhandene Partitionen auf %s ...\n' "$device"
+	wipefs --all --force "$device"
+	printf 'Erstelle neue Partitionen...\n'
+	sfdisk --wipe always --wipe-partitions always "$device" <<< "$layout"
+	sync
+	partprobe "$device"
+	udevadm settle
+	is_block_device "${part}1" && is_block_device "${part}2" || die "Neue Partitionen fehlen; Partitionstabelle wurde nicht neu eingelesen."
+	unmount_device "${part}1"
+	unmount_device "${part}2"
+	printf 'Formatiere Partitionen als FAT32...\n'
+	mkfs.vfat -F32 "${part}1"
+	mkfs.vfat -F32 "${part}2"
+	mount -- "${part}1" "$mount1"
+	mount -- "${part}2" "$mount2"
+	printf 'Kopiere Dateien auf die SD-Karte...\n'
+	cp -R -- "$script_dir/mmcblk0p1/." "$mount1/"
+	cp -R -- "$script_dir/mmcblk0p2/." "$mount2/"
+
+	# Retain support for bundles that put account files directly in HACK/etc.
+	for name in passwd shadow; do
+		if [[ -f "$script_dir/mmcblk0p2/HACK/etc/$name" ]]; then
+			cp -f -- "$script_dir/mmcblk0p2/HACK/etc/$name" "$mount1/$name"
+		fi
+	done
+
+	# Existing local overrides are supported; a requested SD backup takes priority.
+	for destination in hack_custom.conf passwd shadow crontab; do
+		source="$script_dir/$destination"
+		[[ ! -f "$backup/$destination" ]] || source="$backup/$destination"
+		if [[ -f "$source" ]]; then
+			case "$destination" in
+				hack_custom.conf) cp -f -- "$source" "$mount2/HACK/etc/hack_custom.conf" ;;
+				passwd|shadow)
+					mkdir -p -- "$mount2/HACK/etc/config"
+					cp -f -- "$source" "$mount1/$destination"
+					cp -f -- "$source" "$mount2/HACK/etc/config/$destination"
+					;;
+				crontab)
+					mkdir -p -- "$mount2/HACK/var/spool/cron/crontabs"
+					cp -f -- "$source" "$mount2/HACK/var/spool/cron/crontabs/root"
+					;;
+			esac
+		fi
+	done
+	printf 'Synchronisiere Dateisysteme...\n'
+	sync
+	umount -- "$mount2"
+	umount -- "$mount1"
+	cleanup
+	work_dir=
+	printf 'Partitionierung und Datenkopie abgeschlossen!\n'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+	main "$@"
 fi
-
-# SD Groesse (blockdev statt fdisk-Ausgabe zu parsen)
-sdsize=$(blockdev --getsize64 /dev/$disk)
-p2size=$((1024 * 1024 * 1024))                 # Partition 2 = 1 GiB
-# Partition 1 in ganzen MiB; wird als "+<MiB>M" an fdisk uebergeben. Vermeidet die
-# Fliesskomma-/Wissenschaftsnotation (z.B. 6.04e+07) die fdisk nicht als Sektor parsen kann.
-p1mib=$(( (sdsize - p2size) / 1024 / 1024 ))
-
-# Vorhandene (evtl. automatisch gemountete) Partitionen aushaengen
-umount /dev/${disk}?* 2>/dev/null
-
-# Partitionen loeschen
-echo "Loesche vorhandene Partitionen auf /dev/$disk ..."
-wipefs --all --force /dev/$disk
-
-# Partitionierung mit sfdisk (skriptfaehig statt fragiler fdisk-Tastendruck-Sequenz):
-#   Partition 1 = p1mib MiB, Partition 2 = Rest, beide Typ 0x0c (W95 FAT32 LBA)
-echo "Erstelle neue Partitionen..."
-sfdisk --wipe always --wipe-partitions always /dev/$disk <<EOF
-label: dos
-size=${p1mib}MiB, type=0c
-type=0c
-EOF
-
-# Kernel die neue Partitionstabelle einlesen lassen und pruefen, dass beide da sind
-sync
-partprobe /dev/$disk 2>/dev/null
-udevadm settle 2>/dev/null
-sleep 2
-if [ ! -b /dev/${part}1 ] || [ ! -b /dev/${part}2 ]; then
-	echo "Fehler: /dev/${part}1 bzw. /dev/${part}2 wurde nicht angelegt (Partitionstabelle nicht neu eingelesen). Abbruch." >&2
-	exit 1
-fi
-
-# Vor dem Formatieren aushaengen (falls der Desktop automatisch gemountet hat)
-udevadm settle 2>/dev/null
-umount /dev/${part}1 2>/dev/null
-umount /dev/${part}2 2>/dev/null
-
-# Partitionen formatieren
-echo "Formatiere Partitionen als FAT32..."
-mkfs.vfat -F32 /dev/${part}1
-mkfs.vfat -F32 /dev/${part}2
-
-# Partitionen mounten
-mount /dev/${part}1 "$mount1"
-mount /dev/${part}2 "$mount2"
-
-# Dateien kopieren
-echo "Kopiere Dateien auf die erste Partition..."
-cp -r ./mmcblk0p1/* "$mount1"/
-
-echo "Kopiere Dateien auf die zweite Partition..."
-cp -r ./mmcblk0p2/* "$mount2"/
-
-echo "Kopiere Konfigurationsdateien, sofern vorhanden..."
-[ -f "./hack_custom.conf" ] && cp -f ./hack_custom.conf "$mount2/HACK/etc"
-[ -f "./mmcblk0p2/HACK/etc/passwd" ] && cp -f ./mmcblk0p2/HACK/etc/passwd "$mount1/"
-[ -f "./mmcblk0p2/HACK/etc/shadow" ] && cp -f ./mmcblk0p2/HACK/etc/shadow "$mount1/"
-[ -f "./passwd" ] && cp -f ./passwd "$mount1/" && cp -f ./passwd "$mount2/HACK/etc/config"
-[ -f "./shadow" ] && cp -f ./shadow "$mount1/" && cp -f ./shadow "$mount2/HACK/etc/config"
-[ -f "./crontab" ] && cp -f ./crontab "$mount2/HACK/var/spool/cron/crontabs/root"
-
-echo "Synchronisiere Dateisysteme..."
-sync
-echo "Dateisysteme unmounten..."
-# Unmounten
-umount "$mount1"
-umount "$mount2"
-
-# Mount-Punkte bereinigen
-rmdir "$mount1" "$mount2"
-
-echo "Partitionierung und Datenkopie abgeschlossen!"
