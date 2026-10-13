@@ -20,7 +20,12 @@ static pthread_mutex_t fake_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t fake_initialized = 1;
 static void *fake_handles[4] = {(void *)1, (void *)2, (void *)3, (void *)4};
 static video_cb fake_slots[2];
+static audio_cb fake_audio_slot;
 static int sends, last_channel, last_length, sleeps, locks, joins, setter_calls;
+static int audio_sends, audio_length, audio_setter_calls;
+static void *audio_data;
+static uint64_t audio_timestamp;
+static int fail_setter_step, fail_after_publication;
 static void *last_data;
 static uint64_t last_timestamp;
 static useconds_t last_delay;
@@ -28,6 +33,7 @@ static int fake_clock_failure, fake_busy;
 static pthread_mutex_t observations = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t observation_changed = PTHREAD_COND_INITIALIZER;
 static int block_send, send_entered, release_send, stop_entered, stop_completed;
+static int contender_entered;
 static time_t fake_seconds;
 
 static int mock_sleep(useconds_t delay)
@@ -70,16 +76,24 @@ static int mock_set(int channel, video_cb callback)
     assert(channel == 0 || channel == 1);
     assert(callback); /* Publication must never be undone while encoding. */
     ++setter_calls;
+    if (setter_calls == fail_setter_step && !fail_after_publication)
+        return -1;
     fake_slots[channel] = callback;
-    return 0;
+    return setter_calls == fail_setter_step ? -1 : 0;
 }
-static void mock_send(int channel, void *data, int length, uint64_t timestamp)
+static int mock_set_audio(int channel, audio_cb callback)
 {
-    ++sends;
-    last_channel = channel;
-    last_data = data;
-    last_length = length;
-    last_timestamp = timestamp;
+    int step;
+    assert(channel == 0 && callback);
+    ++audio_setter_calls;
+    step = setter_calls + audio_setter_calls;
+    if (step == fail_setter_step && !fail_after_publication)
+        return -1;
+    fake_audio_slot = callback;
+    return step == fail_setter_step ? -1 : 0;
+}
+static void block_sender(void)
+{
     if (block_send) {
         pthread_mutex_lock(&observations);
         send_entered = 1;
@@ -88,6 +102,24 @@ static void mock_send(int channel, void *data, int length, uint64_t timestamp)
             pthread_cond_wait(&observation_changed, &observations);
         pthread_mutex_unlock(&observations);
     }
+}
+static void mock_send(int channel, void *data, int length, uint64_t timestamp)
+{
+    ++sends;
+    last_channel = channel;
+    last_data = data;
+    last_length = length;
+    last_timestamp = timestamp;
+    block_sender();
+}
+static void mock_send_audio(void *data, int32_t length, uint64_t timestamp)
+{
+    /* The stock sender fans out to both sessions. The helper calls it once. */
+    ++audio_sends;
+    audio_data = data;
+    audio_length = length;
+    audio_timestamp = timestamp;
+    block_sender();
 }
 static void *fixture_dlsym(void *handle, const char *name)
 {
@@ -109,13 +141,16 @@ static void setup(void)
     next_join = mock_join;
     get_time = mock_clock;
     set_callback = mock_set;
+    set_audio_callback = mock_set_audio;
     send_video = mock_send;
+    send_audio = mock_send_audio;
     stock_mutex = &fake_mutex;
     stock_initialized = &fake_initialized;
     for (i = 0; i < 4; ++i)
         stock_handles[i] = &fake_handles[i];
     stock_slots[0] = &fake_slots[0];
     stock_slots[1] = &fake_slots[1];
+    stock_audio_slot = &fake_audio_slot;
     owner = getpid();
     armed = 1;
 }
@@ -124,42 +159,102 @@ static void install(void)
     errno = EDOM;
     assert(intercept_usleep(100000, IDLE_LR) == -1);
     assert(errno == EINTR && last_delay == 100000);
-    assert(installed && !disabled && setter_calls == 2);
+    assert(installed && !disabled && setter_calls == 2 && audio_setter_calls == 1);
     assert(fake_slots[0] == main_frame && fake_slots[1] == sub_frame);
+    assert(fake_audio_slot == audio_frame);
 }
 static void foreign(void *a, int32_t b, int32_t c, uint64_t d)
 {
     (void)a; (void)b; (void)c; (void)d;
 }
+static void foreign_audio(void *data, int32_t length, uint64_t timestamp)
+{
+    (void)data; (void)length; (void)timestamp;
+}
 static void assert_no_forward(void)
 {
-    int before = sends;
+    int before = sends, before_audio = audio_sends;
     fake_slots[0]((void *)9, 7, 0, UINT64_C(0xfedcba9876543210));
     fake_slots[1]((void *)9, 7, 1, UINT64_C(0xfedcba9876543210));
-    assert(sends == before);
+    fake_audio_slot((void *)9, 7, UINT64_C(0xfedcba9876543210));
+    assert(sends == before && audio_sends == before_audio);
     assert(fake_slots[0] == main_frame && fake_slots[1] == sub_frame);
+    assert(fake_audio_slot == audio_frame);
 }
 
-static void *sending_thread(void *unused)
+static void *sending_thread(void *audio)
 {
-    (void)unused;
-    main_frame((void *)9, 7, 0, UINT64_C(0xfedcba9876543210));
+    if (audio)
+        audio_frame((void *)9, 7, UINT64_C(0xfedcba9876543210));
+    else
+        main_frame((void *)9, 7, 0, UINT64_C(0xfedcba9876543210));
     return NULL;
 }
-static void *stopping_thread(void *unused)
+static void *stopping_thread(void *join_stop)
 {
-    (void)unused;
     pthread_mutex_lock(&observations);
     stop_entered = 1;
     pthread_cond_broadcast(&observation_changed);
     pthread_mutex_unlock(&observations);
-    assert(intercept_lock(&fake_mutex, STOP_LR) == 0);
-    pthread_mutex_unlock(&fake_mutex);
+    if (join_stop) {
+        assert(intercept_join((pthread_t)1, NULL, JOIN_LR) == 23);
+    } else {
+        assert(intercept_lock(&fake_mutex, STOP_LR) == 0);
+        pthread_mutex_unlock(&fake_mutex);
+    }
     pthread_mutex_lock(&observations);
     stop_completed = 1;
     pthread_cond_broadcast(&observation_changed);
     pthread_mutex_unlock(&observations);
     return NULL;
+}
+
+static void *contending_thread(void *audio)
+{
+    pthread_mutex_lock(&observations);
+    contender_entered = 1;
+    pthread_cond_broadcast(&observation_changed);
+    pthread_mutex_unlock(&observations);
+    return sending_thread(audio);
+}
+static void wait_for_flag(int *flag)
+{
+    pthread_mutex_lock(&observations);
+    while (!*flag)
+        pthread_cond_wait(&observation_changed, &observations);
+    pthread_mutex_unlock(&observations);
+}
+static void release_sender(void)
+{
+    release_send = 1;
+    pthread_cond_broadcast(&observation_changed);
+}
+static void check_failed_install(int step, int after_publication)
+{
+    video_cb saved_video[2];
+    audio_cb saved_audio;
+    int i;
+    fail_setter_step = step;
+    fail_after_publication = after_publication;
+    intercept_usleep(100000, IDLE_LR);
+    assert(disabled && !installed);
+    assert(setter_calls + audio_setter_calls == step);
+    assert(fake_slots[0] == ((step > 1 || after_publication) ? main_frame : NULL));
+    assert(fake_slots[1] == ((step > 2 || (step == 2 && after_publication)) ? sub_frame : NULL));
+    assert(fake_audio_slot == ((step == 3 && after_publication) ? audio_frame : NULL));
+    for (i = 0; i < 2; ++i) {
+        saved_video[i] = fake_slots[i];
+        if (fake_slots[i])
+            fake_slots[i]((void *)9, 7, 0, 1);
+    }
+    saved_audio = fake_audio_slot;
+    if (fake_audio_slot)
+        fake_audio_slot((void *)9, 7, UINT64_C(0xfedcba9876543210));
+    assert(!sends && !audio_sends);
+    intercept_usleep(100000, IDLE_LR);
+    assert(setter_calls + audio_setter_calls == step); /* No retry or clearing. */
+    assert(fake_slots[0] == saved_video[0] && fake_slots[1] == saved_video[1]);
+    assert(fake_audio_slot == saved_audio);
 }
 
 int main(int argc, char **argv)
@@ -176,6 +271,59 @@ int main(int argc, char **argv)
         fake_slots[1]((void *)11, 13, 1, UINT64_C(0x12345678abcdef01));
         assert(sends == 2 && last_channel == 1 && last_data == (void *)11);
         assert(last_length == 13 && last_timestamp == UINT64_C(0x12345678abcdef01));
+    } else if (!strcmp(name, "audio-abi")) {
+        unsigned char borrowed[] = {0xa1, 0x10, 0x20, 0x30, 0x40, 0x50, 0xb2};
+        unsigned char original[sizeof(borrowed)];
+        memcpy(original, borrowed, sizeof(borrowed));
+        install();
+        fake_audio_slot(borrowed + 1, 5, UINT64_C(0xfedcba9876543210));
+        assert(audio_sends == 1 && sends == 0 && audio_data == borrowed + 1);
+        assert(audio_length == 5 && audio_timestamp == UINT64_C(0xfedcba9876543210));
+        fake_audio_slot(borrowed + 2, 3, UINT64_C(0x12345678abcdef01));
+        assert(audio_sends == 2 && audio_data == borrowed + 2 && audio_length == 3);
+        assert(audio_timestamp == UINT64_C(0x12345678abcdef01));
+        fake_audio_slot(borrowed + 1, 1, 0);
+        assert(audio_sends == 3 && audio_timestamp == 0);
+        assert(!memcmp(original, borrowed, sizeof(borrowed)));
+    } else if (!strcmp(name, "audio-bad-buffer-length")) {
+        int before;
+        install();
+        before = locks;
+        fake_audio_slot(NULL, 7, 1);
+        fake_audio_slot((void *)9, 0, 1);
+        fake_audio_slot((void *)9, -1, 1);
+        fake_audio_slot((void *)9, INT32_MIN, UINT64_MAX);
+        assert(!audio_sends && !sends && locks == before);
+    } else if (!strcmp(name, "audio-owner-guards")) {
+        int before;
+        install();
+        before = locks;
+        owner = getpid() + 1;
+        fake_audio_slot((void *)9, 7, 1);
+        owner = getpid();
+        armed = 0;
+        fake_audio_slot((void *)9, 7, 1);
+        assert(!audio_sends && locks == before);
+    } else if (!strcmp(name, "audio-before-install")) {
+        audio_frame((void *)9, 7, 1);
+        assert(!audio_sends && !sends && !installed);
+    } else if (!strcmp(name, "foreign-audio-callback")) {
+        fake_audio_slot = foreign_audio;
+        intercept_usleep(100000, IDLE_LR);
+        assert(disabled && !installed && !setter_calls && !audio_setter_calls);
+        assert(fake_audio_slot == foreign_audio && !fake_slots[0] && !fake_slots[1]);
+    } else if (!strcmp(name, "install-failure-video0")) {
+        check_failed_install(1, 0);
+    } else if (!strcmp(name, "install-failure-video1")) {
+        check_failed_install(2, 0);
+    } else if (!strcmp(name, "install-failure-audio")) {
+        check_failed_install(3, 0);
+    } else if (!strcmp(name, "install-failure-published-video0")) {
+        check_failed_install(1, 1);
+    } else if (!strcmp(name, "install-failure-published-video1")) {
+        check_failed_install(2, 1);
+    } else if (!strcmp(name, "install-failure-published-audio")) {
+        check_failed_install(3, 1);
     } else if (!strcmp(name, "bad-buffer-length")) {
         install();
         fake_slots[0](NULL, 7, 0, 1);
@@ -194,7 +342,8 @@ int main(int argc, char **argv)
         owner = getpid() + 1;
         assert(intercept_usleep(100000, IDLE_LR) == -1);
         main_frame((void *)9, 7, 0, 1);
-        assert(!installed && !locks && !sends && sleeps == 1);
+        audio_frame((void *)9, 7, 1);
+        assert(!installed && !locks && !sends && !audio_sends && sleeps == 1);
     } else if (!strcmp(name, "not-initialized")) {
         fake_initialized = 0;
         intercept_usleep(100000, IDLE_LR);
@@ -242,7 +391,7 @@ int main(int argc, char **argv)
         assert(result == (void *)17 && joins == 1 && disabled);
         assert_no_forward();
         intercept_usleep(100000, IDLE_LR);
-        assert(setter_calls == 2);
+        assert(setter_calls == 2 && audio_setter_calls == 1);
     } else if (!strcmp(name, "stop-teardown")) {
         install();
         assert(intercept_lock(&fake_mutex, STOP_LR) == 0);
@@ -260,16 +409,19 @@ int main(int argc, char **argv)
         assert(!disabled);
         fake_slots[0]((void *)9, 7, 0, 1);
         assert(sends == 1);
-    } else if (!strcmp(name, "drain-inflight")) {
+    } else if (!strcmp(name, "drain-inflight") ||
+               !strcmp(name, "audio-drain-inflight") || !strcmp(name, "audio-drain-join")) {
         pthread_t sending, stopping;
+        int audio = strcmp(name, "drain-inflight") != 0;
+        int join_stop = !strcmp(name, "audio-drain-join");
         install();
         block_send = 1;
-        assert(pthread_create(&sending, NULL, sending_thread, NULL) == 0);
+        assert(pthread_create(&sending, NULL, sending_thread, (void *)(uintptr_t)audio) == 0);
         pthread_mutex_lock(&observations);
         while (!send_entered)
             pthread_cond_wait(&observation_changed, &observations);
         pthread_mutex_unlock(&observations);
-        assert(pthread_create(&stopping, NULL, stopping_thread, NULL) == 0);
+        assert(pthread_create(&stopping, NULL, stopping_thread, (void *)(uintptr_t)join_stop) == 0);
         pthread_mutex_lock(&observations);
         while (!stop_entered)
             pthread_cond_wait(&observation_changed, &observations);
@@ -282,8 +434,27 @@ int main(int argc, char **argv)
         pthread_mutex_unlock(&observations);
         assert(pthread_join(sending, NULL) == 0);
         assert(pthread_join(stopping, NULL) == 0);
-        assert(stop_completed && disabled && sends == 1);
+        assert(stop_completed && disabled);
+        assert(sends == (audio ? 0 : 1) && audio_sends == (audio ? 1 : 0));
         assert_no_forward();
+    } else if (!strcmp(name, "audio-video-serialization") ||
+               !strcmp(name, "video-audio-serialization")) {
+        pthread_t first, second;
+        int first_audio = !strcmp(name, "audio-video-serialization");
+        install();
+        block_send = 1;
+        assert(pthread_create(&first, NULL, sending_thread, (void *)(uintptr_t)first_audio) == 0);
+        wait_for_flag(&send_entered);
+        assert(pthread_create(&second, NULL, contending_thread, (void *)(uintptr_t)!first_audio) == 0);
+        wait_for_flag(&contender_entered);
+        usleep(20000);
+        pthread_mutex_lock(&observations);
+        assert(sends == (first_audio ? 0 : 1));
+        assert(audio_sends == (first_audio ? 1 : 0));
+        release_sender();
+        pthread_mutex_unlock(&observations);
+        assert(pthread_join(first, NULL) == 0 && pthread_join(second, NULL) == 0);
+        assert(sends == 1 && audio_sends == 1 && !disabled);
     } else if (!strcmp(name, "wrong-elf-env")) {
         armed = 0;
         setenv("LSCAMOFLASH_RTSP_PROFILE", "3007325.5", 1);

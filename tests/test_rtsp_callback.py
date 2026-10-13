@@ -8,7 +8,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / 'tests/fixtures/rtsp_callback_fixture.c'
-CASES = ('abi', 'bad-buffer-length', 'callsite', 'unarmed', 'fork-owner',
+CASES = ('abi', 'audio-abi', 'audio-bad-buffer-length', 'audio-owner-guards',
+         'audio-before-install', 'foreign-audio-callback',
+         'install-failure-video0', 'install-failure-video1', 'install-failure-audio',
+         'install-failure-published-video0', 'install-failure-published-video1',
+         'install-failure-published-audio', 'audio-drain-inflight', 'audio-drain-join',
+         'audio-video-serialization', 'video-audio-serialization',
+         'bad-buffer-length', 'callsite', 'unarmed', 'fork-owner',
          'not-initialized', 'missing-handles', 'busy-start', 'foreign-callback',
          'deadline', 'attempt-budget', 'clock-failure', 'join-teardown',
          'stop-teardown', 'other-lifecycle-calls', 'drain-inflight', 'wrong-elf-env', 'identity')

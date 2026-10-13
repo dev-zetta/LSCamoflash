@@ -25,7 +25,9 @@
 #define READY_ATTEMPTS 101
 
 typedef void (*video_cb)(void *, int32_t, int32_t, uint64_t);
+typedef void (*audio_cb)(void *, int32_t, uint64_t);
 typedef int (*set_cb_fn)(int, video_cb);
+typedef int (*set_audio_fn)(int, audio_cb);
 typedef void (*send_fn)(int, void *, int, uint64_t);
 
 static int (*next_usleep)(useconds_t);
@@ -35,12 +37,15 @@ static int (*next_trylock)(pthread_mutex_t *);
 static int (*next_join)(pthread_t, void **);
 static int (*get_time)(clockid_t, struct timespec *) = clock_gettime;
 static set_cb_fn set_callback;
+static set_audio_fn set_audio_callback;
 static send_fn send_video;
+static audio_cb send_audio;
 static pthread_mutex_t lifecycle = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t *stock_mutex;
 static volatile uint32_t *stock_initialized;
 static void *volatile *stock_handles[4];
 static video_cb volatile *stock_slots[2];
+static audio_cb volatile *stock_audio_slot;
 static pid_t owner;
 static int armed, installed, disabled, attempts, clock_started;
 static struct timespec started;
@@ -66,6 +71,7 @@ static void ensure_real_functions(void)
 
 static void main_frame(void *, int32_t, int32_t, uint64_t);
 static void sub_frame(void *, int32_t, int32_t, uint64_t);
+static void audio_frame(void *, int32_t, uint64_t);
 
 static void phase(const char *message)
 {
@@ -138,14 +144,21 @@ static void try_install(void)
     if (!*stock_initialized || next_trylock(stock_mutex) != 0)
         goto done;
     if (handles_ready()) {
-        if (*stock_slots[0] || *stock_slots[1]) {
+        /* The audio producer holds its codec mutex while calling us. This is
+         * the only setter call: all slots must be NULL before publication, so
+         * no producer can already be waiting on lifecycle through our audio
+         * callback. Never clear/reinstall it under lifecycle after publishing;
+         * that would invert the codec/lifecycle lock order. */
+        if (*stock_slots[0] || *stock_slots[1] || *stock_audio_slot) {
             disable_locked("camoflash-rtsp: callback-conflict\n");
         } else if (set_callback(0, main_frame) != 0 ||
-                   set_callback(1, sub_frame) != 0) {
+                   set_callback(1, sub_frame) != 0 ||
+                   set_audio_callback(0, audio_frame) != 0) {
             disable_locked("camoflash-rtsp: callback-install-failed\n");
         } else {
             installed = 1;
             phase("camoflash-rtsp: callbacks-installed\n");
+            phase("camoflash-rtsp: audio-callback-installed\n");
         }
     }
     next_unlock(stock_mutex);
@@ -179,6 +192,19 @@ static void sub_frame(void *data, int32_t length, int32_t frame_type,
 {
     (void)frame_type;
     forward_frame(1, data, length, timestamp_ms);
+}
+
+static void audio_frame(void *data, int32_t length, uint64_t timestamp_ms)
+{
+    if (!qualified() || !data || length <= 0)
+        return;
+    /* The stock encoder owns this G.711 A-law buffer until we return. Its
+     * sender fans out to both sessions and converts milliseconds internally.
+     * Serialize with video/event handling and drain on the same stop gate. */
+    next_lock(&lifecycle);
+    if (installed && !disabled)
+        send_audio(data, length, timestamp_ms);
+    next_unlock(&lifecycle);
 }
 
 static int intercept_usleep(useconds_t usec, uintptr_t caller)
@@ -247,7 +273,12 @@ static const struct signature {
     {0xc376c, {0xe52db004,0xe28db000,0xe24dd00c,0xe50b0008}},
     {0xbcf08, {0xe92d4810,0xe28db008,0xe24dd01c,0xe50b0010}},
     {0xc0a44, {0xe51b301c,0xe593303c,0xe3530000,0x0a000011}},
-    {0xc21dc, {0xe51b3028,0xe593303c,0xe3530000,0x0a000020}}
+    {0xc21dc, {0xe51b3028,0xe593303c,0xe3530000,0x0a000020}},
+    {0xa915c, {0xe92d4800,0xe28db004,0xe24dd010,0xe50b0010}},
+    {0xa91c8, {0xe51b300c,0xe51b2014,0xe5832024,0xe51b300c}},
+    {0xa5d84, {0xe5933024,0xe3530000,0x0a00000a,0xe51b3038}},
+    {0xa5da4, {0xebffbd69,0xe1a02000,0xe1a03001,0xe1a00005}},
+    {0xbcfd0, {0xe92d4800,0xe28db004,0xe24dd018,0xe50b0008}}
 };
 
 static int identity_fd(int fd)
@@ -295,9 +326,13 @@ static void initialize(void)
     if (!identity || sizeof(void *) != 4 || sizeof(pthread_mutex_t) != 24)
         return;
     set_callback = dlsym(RTLD_DEFAULT, "ht_video_codec_set_get_venc_cb");
+    set_audio_callback = dlsym(RTLD_DEFAULT, "ht_audio_codec_set_get_aenc_cb");
     send_video = dlsym(RTLD_DEFAULT, "ht_rtsp_send_video_frame");
+    send_audio = dlsym(RTLD_DEFAULT, "ht_rtsp_send_audio_frame");
     if ((uintptr_t)set_callback != 0xc376c ||
+        (uintptr_t)set_audio_callback != 0xa915c ||
         (uintptr_t)send_video != 0xbcf08 ||
+        (uintptr_t)send_audio != 0xbcfd0 ||
         (uintptr_t)dlsym(RTLD_DEFAULT, "ht_rtsp_init") != 0xbd770 ||
         (uintptr_t)dlsym(RTLD_DEFAULT, "ht_rtsp_deinit") != 0xbd960)
         return;
@@ -309,6 +344,7 @@ static void initialize(void)
     stock_handles[3] = (void *volatile *)0x5378a8;
     stock_slots[0] = (video_cb volatile *)0x537964;
     stock_slots[1] = (video_cb volatile *)0x5379a4;
+    stock_audio_slot = (audio_cb volatile *)0x534954;
     owner = getpid();
     armed = 1;
     phase("camoflash-rtsp: exact-profile-armed\n");
