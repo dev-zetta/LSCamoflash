@@ -8,14 +8,17 @@ This project includes various third-party software packages, each with its own l
 
 ---
 
-## Toolchains
-- **Bootlin Toolchain (uClibc)**  
-  License: GNU General Public License (GPLv2)
-  Source: https://toolchains.bootlin.com
+## Release artifacts and source
 
-- **Bootlin Toolchain (glibc)**  
-  License: GNU General Public License (GPLv2)
-  Source: https://toolchains.bootlin.com
+The project license applies to project-authored code. Third-party components keep their own licenses; the full runtime, backup kit and source bundle must not be described as wholly MIT licensed. Which optional components are included depends on the SOURCE/Makefile build options.
+
+`SOURCE/src/bin/prepare-release.py --output release` stages the versioned full and update archives, a separate backup-kit archive, LICENSE.MIT, COPYING.BusyBox, THIRD_PARTY_NOTICES.md, SHA256SUMS and a public source bundle. The source bundle contains Git-tracked public files, including build scripts, configurations and patches, plus all hydrated archives and other inputs declared in SOURCE/Makefile URLS. Private research, untracked extracted files and undeclared downloads are excluded. Each upstream source archive retains its license texts.
+
+## Toolchains
+
+The Bootlin 2020.08-1 uClibc, glibc and musl toolchains contain components under several licenses, rather than one GPLv2 license. The uClibc toolchain README.txt identifies, among others, GPLv3+ binutils, LGPL-2.1+ uClibc-ng, GPLv2 Linux headers, and differently licensed host tools. GCC and its runtime libraries also carry component-specific terms and runtime exceptions; consult their original notices.
+
+The archived toolchains are prebuilt distributions, not complete compiler or C-library source bundles. Bootlin publishes separate [component sources](https://toolchains.bootlin.com/downloads/releases/sources/) and [license information](https://toolchains.bootlin.com/downloads/releases/licenses/). Their README.txt gives the rebuild repository [bootlin/buildroot-toolchains](https://github.com/bootlin/buildroot-toolchains), tag `toolchains.bootlin.com-2020.08-1`, and the matching architecture/libc build fragment. These external source and license catalogs are not mirrored by the release preparer. See [Bootlin's toolchain documentation](https://toolchains.bootlin.com/).
 
 ## JavaScript
 - **Bootstrap (5.x)**  
@@ -52,7 +55,7 @@ This project includes various third-party software packages, each with its own l
   Lizenz: GNU Lesser General Public License (LGPL)  
   Quelle: [https://gmplib.org](https://gmplib.org)
 
-- **libexecinfo (1.1-rc1)**  
+- **libexecinfo (1.1-rc2)**
   Lizenz: BSD License  
   Quelle: [https://www.freshports.org/devel/libexecinfo/](https://www.freshports.org/devel/libexecinfo/)
 
@@ -85,6 +88,10 @@ This project includes various third-party software packages, each with its own l
   Quelle: [https://www.genivia.com/products/gsoap/](https://www.genivia.com/products/gsoap/)
 
 ## Utilities
+- **BusyBox (1.36.1)**
+  License: GNU General Public License version 2 only (GPLv2-only). The source archive's LICENSE contains the notice and license text; the release preparer includes those exact bytes as COPYING.BusyBox. The repository includes its build configuration and patches.
+  Source and license: [BusyBox](https://busybox.net/license.html)
+
 - **php (8.4.4)**  
   Lizenz: PHP-License Version 3.01
   Quelle: [https://www.php.net](https://www.php.net)
@@ -106,8 +113,8 @@ This project includes various third-party software packages, each with its own l
   Quelle: [https://curl.se](https://curl.se)
 
 - **FFmpeg (7.1)**  
-  Lizenz: GNU Lesser General Public License (LGPL)  
-  Quelle: [https://ffmpeg.org](https://ffmpeg.org)
+  License for this build: GNU General Public License version 3 or later (GPLv3+). The recipe enables both `--enable-gpl` and `--enable-version3`; see the source archive's LICENSE.md and COPYING.GPLv3, and [FFmpeg license documentation](https://ffmpeg.org/legal.html).
+  Source: [https://ffmpeg.org](https://ffmpeg.org)
 
 - **Joe's Own Editor (4.6)**  
   Lizenz: GNU General Public License (GPL)  
@@ -125,7 +132,7 @@ This project includes various third-party software packages, each with its own l
   Lizenz: GNU General Public License (GPL)  
   Quelle: [https://marlam.de/msmtp/](https://marlam.de/msmtp/)
 
-- **onvif_srvd (1.1)**  
+- **onvif_srvd (2.0)**
   Lizenz: GNU General Public License (GPL)  
   Quelle: [https://github.com/KoynovStas/onvif_srvd](https://github.com/KoynovStas/onvif_srvd)
 
@@ -134,7 +141,7 @@ This project includes various third-party software packages, each with its own l
   Quelle: [https://rada.re/n/radare2.html](https://rada.re/n/radare2.html)
 
 - **strace (6.9)**  
-  Lizenz: GNU General Public License (GPL)  
+  License: GNU Lesser General Public License version 2.1 or later (LGPL-2.1+), as stated in the source COPYING file. Its test suite and bundled Linux headers have separate terms.
   Quelle: [https://strace.io](https://strace.io)
 
 - **tcpdump (4.99.4)**  

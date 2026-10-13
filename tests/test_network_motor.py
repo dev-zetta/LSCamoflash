@@ -37,6 +37,7 @@ class NetworkTests(unittest.TestCase):
                               path / "commands"):
                 directory.mkdir(parents=True, exist_ok=True)
             events = path / "events"
+            mount_targets = path / "mount-targets"
             cli = path / "stock/bin/wpa_cli"
             cli.write_text('''#!/bin/sh
 count=$(cat "$TEST_COUNT" 2>/dev/null || echo 0)
@@ -65,7 +66,11 @@ for arg do printf ' <%s>' "$arg" >> "$TEST_EVENTS"; done
 printf '\\n' >> "$TEST_EVENTS"
 ''')
             mount = path / "commands/mount"
-            mount.write_text('#!/bin/sh\necho mount >> "$TEST_EVENTS"\n')
+            mount.write_text('''#!/bin/sh
+[ "$#" = 3 ] && [ "$1" = --bind ] && [ "$2" = "$TEST_EXIT_SH" ] && [ -f "$3" ] || exit 81
+echo mount >> "$TEST_EVENTS"
+printf '%s\\n' "$3" >> "$TEST_MOUNT_TARGETS"
+''')
             pgrep = path / "commands/pgrep"
             pgrep.write_text('#!/bin/sh\nexit 1\n')
             for command in (cli, wpa, sleep, dhcp, mount, pgrep):
@@ -76,6 +81,8 @@ printf '\\n' >> "$TEST_EVENTS"
             # these are only ordinary fixture files and mount itself is stubbed.
             (path / "stock/sbin/station_connect.sh").touch()
             (path / "stock/sbin/wifi_fixture.sh").touch()
+            exit_script = hack / "sbin/exit.sh"
+            exit_script.write_text("#!/bin/sh\nexit 0\n")
             paired_path = path / "ram/wpa_supplicant.conf"
             if paired is not None:
                 paired_path.write_text(paired)
@@ -101,14 +108,24 @@ printf '\\n' >> "$TEST_EVENTS"
                 "".join(f"{key}={shlex.quote(value)}\n" for key, value in commands.items()))
             env = dict(os.environ, TEST_COUNT=str(path / "count"),
                        TEST_EVENTS=str(events), TEST_COMPLETED_AFTER=str(completed_after),
+                       TEST_MOUNT=str(mount), TEST_PGREP=str(pgrep), TEST_EXIT_SH=str(exit_script),
+                       TEST_MOUNT_TARGETS=str(mount_targets),
                        hack=str(hack), hack_conf=str(conf), hack_custom_conf="",
                        PATH=str(path / "commands") + os.pathsep + os.environ["PATH"])
+            # Standalone BusyBox ash can re-exec its applets before PATH lookup
+            # when ARM binfmt is enabled. Functions always select our harmless
+            # fixtures, including on CI hosts where that re-exec succeeds.
+            startup = ('mount() { "$TEST_MOUNT" "$@"; }\n'
+                       'pgrep() { "$TEST_PGREP" "$@"; }\n') + startup
             result = subprocess.run([*runtime_shell("sh"), "-c", startup], env=env,
                                     capture_output=True, text=True, timeout=10)
             marker = (path / "ram/network.init").read_text().strip()
             return {
                 "result": result, "marker": marker,
                 "events": events.read_text().splitlines() if events.exists() else [],
+                "mount_targets": [str(Path(target).relative_to(path))
+                                  for target in mount_targets.read_text().splitlines()]
+                                 if mount_targets.exists() else [],
                 "paired": paired_path.read_text() if paired_path.exists() else None,
                 "custom": (path / "ram/wpa_custom.conf").exists(),
                 "copied": (hack / "bin/wifi_sup").exists(),
@@ -204,6 +221,10 @@ printf '\\n' >> "$TEST_EVENTS"
         self.assertTrue(setup["custom"])
         self.assertTrue(setup["copied"])
         self.assertIn("mount", setup["events"])
+        self.assertCountEqual(setup["mount_targets"], [
+            "stock/sbin/station_connect.sh", "stock/sbin/wifi_fixture.sh",
+            "stock/bin/wpa_supplicant", "stock/bin/wpa_cli",
+        ])
         invocation = next(event for event in setup["events"] if event.startswith("supplicant"))
         self.assertIn("<-Dfixture-driver>", invocation)
         self.assertIn("/ram/wpa_custom.conf>", invocation)

@@ -1,76 +1,80 @@
-name: Create Stable Release
+name: Publish Release
 
 on:
   workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful Build-Test run for this exact main commit
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
+      - name: Check out the release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1; Node 24
         with:
-          fetch-depth: 0
-          persist-credentials: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install required build tools
-        run: sudo apt update && sudo apt install -y build-essential flex bison gsoap binutils make automake autoconf autoconf-archive
-
-      - name: Build release
+          persist-credentials: false
+      - name: Require successful validation of this exact commit
         shell: bash
         run: |
           set -euo pipefail
-          cd SOURCE
-          make mrproper-full download
-          make all-and-optionals
-          make release
-          make update
-          mkdir -p ../release
-          cp -v LSCamoflash-*-uclibc.tar.gz ../release/
-          cp -v update-*-uclibc.tgz ../release/
-
-      # Version changes are explicit; make all/release do not mutate version.txt.
-
-      - name: Commit and push updated SOURCE/version.txt
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > build-run.json
+          python3 - <<'PY'
+          import json, os
+          run = json.load(open('build-run.json'))
+          checks = (
+              (run['head_sha'] == os.environ['GITHUB_SHA'], 'Build commit differs from release source'),
+              (run['head_repository']['full_name'] == os.environ['GH_REPO'], 'Build is from another repository'),
+              (run['path'] == '.github/workflows/makefile.yml', 'Expected Build-Test workflow'),
+              (run['status'] == 'completed' and run['conclusion'] == 'success', 'Build did not pass'),
+              (run['event'] in ('push', 'workflow_dispatch'), 'Release requires a trusted branch build'),
+          )
+          for valid, message in checks:
+              if not valid:
+                  raise SystemExit(message)
+          PY
+      - name: Download and verify the validated assets
         shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          branch="${GITHUB_REF#refs/heads/}"
-          if [ -z "$branch" ]; then
-            branch="main"
-          fi
-          if git status --porcelain -- SOURCE/version.txt | grep . >/dev/null 2>&1; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add SOURCE/version.txt
-            git commit -m "ci(release): update SOURCE/version.txt to $(cat SOURCE/version.txt)"
-            git push origin "HEAD:${branch}"
-          else
-            echo "No changes to SOURCE/version.txt to commit"
-          fi
-
-      - name: Version nach Build/Update lesen (sanitize)
-        id: version
+          gh run download "$BUILD_RUN_ID" --name "LSCamoflash-release-$GITHUB_SHA" --dir release
+          cd release
+          sha256sum --strict --check SHA256SUMS
+      - name: Publish the version and changelog
         shell: bash
         run: |
-          ver="$(cat SOURCE/version.txt | tr -d '\r\n' | sed 's/^v//')"
-          echo "VERSION=$ver" >> "$GITHUB_OUTPUT"
-          echo "Version: $ver"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Release v${{ steps.version.outputs.VERSION }}
-          files: |
-            release/LSCamoflash-*-uclibc.tar.gz
-            release/update-*-uclibc.tgz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          set -euo pipefail
+          version="$(tr -d '\r\n' < SOURCE/version.txt)"
+          [[ "$version" =~ ^1\.[0-9]{2}\.[0-9]{4}$ ]]
+          grep -F "## [$version]" CHANGELOG.md
+          gh api "repos/$GH_REPO/git/matching-refs/tags/v$version" > tag-refs.json
+          VERSION="$version" python3 - <<'PY'
+          import json, os
+          refs = json.load(open('tag-refs.json'))
+          if any(ref['ref'] == 'refs/tags/v' + os.environ['VERSION'] for ref in refs):
+              raise SystemExit('Version tag already exists')
+          PY
+          gh release create "v$version" release/* \
+            --target "$GITHUB_SHA" \
+            --title "LSCamoflash $version" \
+            --notes-file CHANGELOG.md \
+            --latest

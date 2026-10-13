@@ -20,12 +20,21 @@ CASES = ('abi', 'audio-abi', 'audio-bad-buffer-length', 'audio-owner-guards',
          'stop-teardown', 'other-lifecycle-calls', 'drain-inflight', 'wrong-elf-env', 'identity')
 
 
+def absolute_executable(command):
+    executable = shutil.which(command)
+    if executable is None:
+        raise FileNotFoundError(f'Configured fixture executable not found: {command}')
+    return str(Path(executable).absolute())
+
+
 class RTSPCallbackTests(unittest.TestCase):
     def run_fixture(self, arm):
         cc = (os.environ.get('RTSP_ARM_CC') or os.environ.get('BACKUP_ARM_CC')) if arm else shutil.which('cc')
         qemu = (os.environ.get('RTSP_QEMU') or os.environ.get('BACKUP_QEMU')) if arm else None
         if not cc or (arm and not qemu):
             self.skipTest('Set RTSP_ARM_CC and RTSP_QEMU for ARM926 fixtures' if arm else 'Host C compiler required')
+        if arm:
+            qemu = absolute_executable(qemu)
         with tempfile.TemporaryDirectory(prefix='camoflash-rtsp-') as temporary:
             binary = Path(temporary) / 'fixture'
             command = [cc, '-std=c99', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror', '-O2']
@@ -41,11 +50,15 @@ class RTSPCallbackTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout.strip(), 'PASS')
 
-    def run_preload_smoke(self, arm):
+    def run_preload_smoke(self, arm, bare_child_qemu=False):
         cc = (os.environ.get('RTSP_ARM_CC') or os.environ.get('BACKUP_ARM_CC')) if arm else shutil.which('cc')
         qemu = (os.environ.get('RTSP_QEMU') or os.environ.get('BACKUP_QEMU')) if arm else None
         if not cc or (arm and not qemu):
             self.skipTest('Set RTSP_ARM_CC and RTSP_QEMU for ARM926 preload smoke' if arm else 'Host C compiler required')
+        if arm:
+            # Keep the child prefix independent of any later PATH changes,
+            # even when CI configured the outer executable as bare qemu-arm.
+            qemu = absolute_executable(qemu)
         flags = ['-std=c99', '-Wall', '-Wextra', '-Werror', '-O2']
         if arm:
             flags += ['-march=armv5te', '-mtune=arm926ej-s', '-mfloat-abi=soft', '-marm']
@@ -61,6 +74,11 @@ class RTSPCallbackTests(unittest.TestCase):
             env = dict(os.environ)
             env.pop('LD_PRELOAD', None)
             env.pop('LSCAMOFLASH_RTSP_PROFILE', None)
+            if bare_child_qemu:
+                tools = Path(temporary) / 'tools'
+                tools.mkdir()
+                (tools / 'qemu-arm').symlink_to(qemu)
+                env['PATH'] = str(tools) + os.pathsep + env.get('PATH', '')
             for profile in ('3007325.5', 'wrong-profile'):
                 with self.subTest(architecture='ARM926' if arm else 'host', profile=profile):
                     if arm:
@@ -70,7 +88,7 @@ class RTSPCallbackTests(unittest.TestCase):
                         # QEMU user-mode cannot exec an ARM child on hosts without
                         # binfmt registration; this fixture supplies its own QEMU
                         # prefix through an environment value for the child exec.
-                        env['RTSP_FIXTURE_QEMU'] = str(qemu)
+                        env['RTSP_FIXTURE_QEMU'] = 'qemu-arm' if bare_child_qemu else qemu
                         env['RTSP_FIXTURE_SYSROOT'] = sysroot
                     else:
                         command = [str(binary)]
@@ -85,6 +103,8 @@ class RTSPCallbackTests(unittest.TestCase):
         qemu = (os.environ.get('RTSP_QEMU') or os.environ.get('BACKUP_QEMU')) if arm else None
         if not cc or (arm and not qemu):
             self.skipTest('Set RTSP_ARM_CC and RTSP_QEMU for ARM926 dependency constructors' if arm else 'Host C compiler required')
+        if arm:
+            qemu = absolute_executable(qemu)
         flags = ['-std=c99', '-Wall', '-Wextra', '-Werror', '-O2']
         if arm:
             flags += ['-march=armv5te', '-mtune=arm926ej-s', '-mfloat-abi=soft', '-marm']
@@ -139,6 +159,9 @@ class RTSPCallbackTests(unittest.TestCase):
 
     def test_arm926_shared_preload_passthrough(self):
         self.run_preload_smoke(True)
+
+    def test_arm926_shared_preload_child_searches_path_for_bare_qemu(self):
+        self.run_preload_smoke(True, bare_child_qemu=True)
 
     def test_host_callback_abi_and_lifecycle(self):
         self.run_fixture(False)

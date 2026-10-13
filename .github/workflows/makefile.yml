@@ -3,10 +3,10 @@ name: Build-Test
 on:
   push:
     branches: [main]
-    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tests/**', '.github/workflows/makefile.yml']
+    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tests/**', 'CHANGELOG.md', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tests/**', '.github/workflows/makefile.yml']
+    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tests/**', 'CHANGELOG.md', '.github/workflows/**']
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1; Node 24
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential busybox fdisk flex bison gsoap binutils make cmake python3 automake autoconf autoconf-archive qemu-user
       - name: Build default ARM uclibc packages and archives
@@ -31,21 +31,28 @@ jobs:
         run: python3 SOURCE/src/bin/verify-build.py --output .local/logs/artifact-verification.json
       - name: Run regressions with ARM926 BusyBox ash and backup tools
         env:
-          CAMOFLASH_RUNTIME_SHELL: qemu-arm -cpu arm926 ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash
+          CAMOFLASH_RUNTIME_SHELL: /usr/bin/qemu-arm -cpu arm926 ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash
           BACKUP_ARM_CC: ${{ github.workspace }}/SOURCE/toolchain/uclibc/bin/arm-buildroot-linux-uclibcgnueabi-gcc
           BACKUP_ARM_BUSYBOX: ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox
-          BACKUP_QEMU: qemu-arm
-        run: python3 -m unittest discover -s tests -v
+          BACKUP_QEMU: /usr/bin/qemu-arm
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -v 2>&1 | tee .local/logs/regressions.log
+      - name: Prepare versioned release assets and source bundle
+        run: python3 SOURCE/src/bin/prepare-release.py --output release
       - name: Upload build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node 24
         with:
           name: build-log
+          include-hidden-files: true
           path: |
             .local/logs/build.log
             .local/logs/artifact-verification.json
+            .local/logs/regressions.log
       - name: Upload firmware archives
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node 24
         with:
           name: LSCamoflash-uclibc
           path: |
@@ -53,8 +60,15 @@ jobs:
             SOURCE/update-*-uclibc.tgz
           if-no-files-found: error
       - name: Upload separate firmware backup kit
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node 24
         with:
           name: LSCamoflash-nor-backup-kit
           path: SOURCE/backup-kit/
           if-no-files-found: error
+      - name: Upload validated release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node 24
+        with:
+          name: LSCamoflash-release-${{ github.sha }}
+          path: release/*
+          if-no-files-found: error
+          compression-level: 0

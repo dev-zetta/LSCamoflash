@@ -43,7 +43,7 @@ int main(int argc, char **argv)
         const char *qemu = getenv("RTSP_FIXTURE_QEMU");
         const char *sysroot = getenv("RTSP_FIXTURE_SYSROOT");
         if (qemu && sysroot)
-            execl(qemu, qemu, "-cpu", "arm926", "-L", sysroot, argv[0], "after-exec", (char *)NULL);
+            execlp(qemu, qemu, "-cpu", "arm926", "-L", sysroot, argv[0], "after-exec", (char *)NULL);
         else
             execl(argv[0], argv[0], "after-exec", (char *)NULL);
         _exit(127);

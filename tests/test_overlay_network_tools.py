@@ -6,14 +6,25 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT = (ROOT / "SOURCE/src/sdcard/mmcblk0p2/HACK/sbin/init.sh").read_text()
 BEGIN = INIT.index("configure_overlay_network_tools()")
 FUNCTION = INIT[BEGIN:INIT.index('\noverlay_dirs=', BEGIN)]
-SHELL = [str((ROOT / item).resolve()) if "/" in item and not item.startswith("-") else item
-         for item in shlex.split(os.environ.get("CAMOFLASH_RUNTIME_SHELL", "/bin/sh"))]
+def runtime_shell(command):
+    parts = [str((ROOT / item).resolve()) if "/" in item and not item.startswith("-") else item
+             for item in shlex.split(command)]
+    # The policy fixture deliberately removes host tools from PATH. Resolve
+    # the outer shell/QEMU now, before applying that isolated child environment.
+    executable = shutil.which(parts[0])
+    if executable:
+        parts[0] = str(Path(executable).absolute())
+    return parts
+
+
+SHELL = runtime_shell(os.environ.get("CAMOFLASH_RUNTIME_SHELL", "/bin/sh"))
 EXACT_MD5 = "7c2a124cdd607ebef63fb66d063b6a87"
 
 
@@ -39,11 +50,25 @@ class OverlayNetworkToolsTests(unittest.TestCase):
                         ln=shutil.which("ln"), rm=shutil.which("rm"), TOOL_CALLS=str(self.calls),
                         PATH=str(self.sbin))
 
-    def policy(self, expected=0):
-        result = subprocess.run([*SHELL, "-c", FUNCTION + "\nconfigure_overlay_network_tools || exit 1\n"],
+    def policy(self, expected=0, shell=None):
+        result = subprocess.run([*(SHELL if shell is None else shell), "-c", FUNCTION + "\nconfigure_overlay_network_tools || exit 1\n"],
                                 env=self.env, text=True, capture_output=True, timeout=5)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
+
+    def test_bare_runtime_shell_survives_isolated_overlay_path(self):
+        tools = self.base / "outer-tools"
+        tools.mkdir()
+        launcher = tools / "fixture-shell"
+        launcher.symlink_to("/bin/sh")
+        with patch.dict(os.environ, PATH=str(tools)):
+            shell = runtime_shell("fixture-shell")
+        self.assertEqual(shell, [str(launcher)])
+        self.policy(shell=shell)
+        for name in ("ifconfig", "udhcpc"):
+            result = subprocess.run([name], env=self.env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls.read_text().splitlines(), ["stock:ifconfig", "stock:udhcpc"])
 
     def test_exact_profile_restores_bare_path_commands_to_stock_busybox(self):
         self.policy()

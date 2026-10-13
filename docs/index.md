@@ -4,7 +4,7 @@ layout: default
 
 # 👁️‍🗨️ LSCamoflash
 
-For this fork's current evidence and setup, read the [verified NOR backup procedure](./firmware-backup.md), [experimental 3007325.5 runtime guide](./camera-3007325.5.md) and [integration notes](./integration.md). The documented camera has accepted firmware backup, network/web access, both local RTSP video/audio streams and manual ONVIF substream selection. The user confirmed audible microphone sound. Detailed audio/video synchronization, custom PTZ and long-term operation remain separate device tests. Automatic ONVIF discovery is not bundled. The release notes below describe legacy upstream features, and upstream release downloads do not include this fork's changes.
+Download [fork release 1.03.2413](https://github.com/dev-zetta/LSCamoflash/releases/tag/v1.03.2413) and read the [changelog](https://github.com/dev-zetta/LSCamoflash/blob/v1.03.2413/CHANGELOG.md). For current evidence and setup, read the [verified NOR backup procedure](./firmware-backup.md), [experimental 3007325.5 runtime guide](./camera-3007325.5.md) and [integration notes](./integration.md). The documented camera has accepted firmware backup, network/web access, both local RTSP video/audio streams and manual ONVIF substream selection. The user confirmed audible microphone sound. Detailed audio/video synchronization, custom PTZ and long-term operation remain separate device tests. Automatic ONVIF discovery is not bundled. The release notes below describe legacy upstream features, and upstream release downloads do not include this fork's changes.
 
 LSCamoflash is a modified firmware package for LSC Tuya based IP cameras that adds powerful features like local-only operation, cloud-free RTSP streaming, camera control via web UI, and more.
 
@@ -23,7 +23,7 @@ LSCamoflash is a modified firmware package for LSC Tuya based IP cameras that ad
 
 ## 📦 Download Latest Release Version
 
-👉 [Download Latest Release](https://github.com/Bunkerschild/LSCamoflash/releases/latest)
+👉 [Download Latest Fork Release](https://github.com/dev-zetta/LSCamoflash/releases/latest)
 
 ## 📚 Full Release Notes
 

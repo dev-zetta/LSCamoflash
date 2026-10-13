@@ -82,7 +82,7 @@ class BootDiagnosticsTests(unittest.TestCase):
             f"Name:\t{name}\nPid:\t{pid}\nPPid:\t{ppid}\nSecret:\tPRIVATE_STATUS\n" + status_extra)
         (path / "cmdline").write_bytes(b"PRIVATE_ARGV\0PRIVATE_PASSWORD\0")
 
-    def run_helper(self):
+    def run_helper(self, *, timeout=8):
         text = SCRIPT.read_text().replace("proc_root=/proc", "proc_root=" + shlex.quote(str(self.proc)))
         text = text.replace("sys_root=/sys", "sys_root=" + shlex.quote(str(self.sys)))
         text = text.replace("tmp_root=/tmp", "tmp_root=" + shlex.quote(str(self.tmp)))
@@ -119,7 +119,7 @@ class BootDiagnosticsTests(unittest.TestCase):
         copied.write_text(text)
         result = subprocess.run([*shell(), str(copied), str(self.hack)],
                                 env=dict(os.environ, FIXTURE=str(self.base), LD_LIBRARY_PATH="/fixture-untrusted-libs"),
-                                text=True, capture_output=True, timeout=8)
+                                text=True, capture_output=True, timeout=timeout)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result, (self.logs / "handoff.log").read_text() if (self.logs / "handoff.log").is_file() else ""
 
@@ -254,7 +254,9 @@ class BootDiagnosticsTests(unittest.TestCase):
                 shutil.rmtree(path)
         for pid in range(1000, 1070):
             self.process(pid, "busybox", 1, "VmRSS:\t64 kB\nVmSize:\t128 kB\nThreads:\t1\n")
-        _, output = self.run_helper()
+        # Five full samples launch hundreds of emulated awk processes. Keep
+        # every process-limit assertion while allowing slower CI QEMU hosts.
+        _, output = self.run_helper(timeout=30)
         samples = output.split("sample nominal_seconds=")[1:]
         self.assertEqual(len(samples), 5)
         for sample in samples:
