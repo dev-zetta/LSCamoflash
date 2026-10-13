@@ -2,6 +2,12 @@
 
 This fork starts at upstream commit `40bf27bcd782139e05b7067761cad337cf52d1fd`. The inventory below was retrieved from GitHub on 2026-10-12. Upstream pull requests and issues remain owned by their original repository; merging their commits here does not close them upstream.
 
+## Current release and setup
+
+Use the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest), [installation guide](installation.md) and [building guide](building.md) for current instructions. Release v1.03.2413 passed hosted [Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/runs/38447987161) with all 334 ARM tests, [Shell regressions](https://github.com/dev-zetta/LSCamoflash/actions/runs/38447987054), [CodeQL](https://github.com/dev-zetta/LSCamoflash/actions/runs/38447987529) and [publication](https://github.com/dev-zetta/LSCamoflash/actions/runs/38455561395). All eight published assets were checked against their SHA-256 digests.
+
+The detailed validation sections below retain the development history. Older archive hashes, failed camera attempts and statements that no release had been published describe their individual checkpoints, not the current release. Current device setup and acceptance limits are in the [3007325.5 guide](camera-3007325.5.md).
+
 ## Integrated pull requests
 
 All four open pull requests were merged with their original commits and attribution preserved.
@@ -43,34 +49,9 @@ The exact 3007325.5 firmware uses different RAM mode markers, stream ports and c
 
 ## Reproducing verification
 
-Run the hermetic host regression suite from the repository root:
+Follow [Building and testing](building.md) for current host dependencies, fork/LFS source setup, ARM builds, artifact verification and host/ARM926 regression commands. The default Build-Test gate covers uClibc; experimental libc configurations and optional packages need separate validation. Release publication is manual and uses the artifact from a successful build of the exact commit.
 
-```sh
-python3 -m unittest discover -s tests -v
-```
-
-Build the default ARM/uclibc configuration and both archives with:
-
-```sh
-cd SOURCE
-make nproc=8 all release update
-```
-
-After building, install `qemu-user` on Debian/Ubuntu and run `python3 src/bin/verify-build.py` with Python 3.11 or later from `SOURCE` to repeat the packaged program and archive checks. The checker accepts `--qemu /path/to/qemu-arm` for a portable local emulator.
-
-From the repository root, include the ARM926 runtime and backup checks in the full suite with:
-
-```sh
-CAMOFLASH_RUNTIME_SHELL="qemu-arm -cpu arm926 $PWD/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash" \
-BACKUP_ARM_CC="$PWD/SOURCE/toolchain/uclibc/bin/arm-buildroot-linux-uclibcgnueabi-gcc" \
-BACKUP_ARM_BUSYBOX="$PWD/SOURCE/build/mmcblk0p2/HACK/bin/busybox" \
-BACKUP_QEMU="qemu-arm" \
-python3 -m unittest discover -s tests -v
-```
-
-The build requires the host dependencies listed in the README and real archive contents rather than Git LFS pointer files. The downloader hydrates pointer files atomically and checks their recorded SHA-256 before replacing them; a global Git LFS installation is optional. Creating the build directory no longer increments the source version. Version changes are explicit through the existing `update-version-*` targets. The fork's Build-Test workflow builds the default configuration and uploads archives and a log. Experimental libc configurations and all optional packages are separate from this default build gate. GitHub Pages publication and stable releases are manual operations.
-
-Host regressions, cross compilation and archive inspection do not establish SD installation, physical PTZ motion, camera boot, RTSP frame delivery or ONVIF discovery on real hardware. The initial checks below completed locally on 2026-10-12 before the subsequent camera backup work. They describe that earlier fork snapshot, not the current artifacts. The later backup verification and runtime acceptance limits are recorded in the camera-specific guides.
+Host regressions, cross-compilation and archive inspection do not establish installation, physical PTZ motion, camera boot, RTSP delivery or ONVIF discovery on hardware. The sections below record earlier snapshots; refer to the current guides and release checks above for current setup and artifacts.
 
 ## Initial fork validation
 
@@ -94,7 +75,7 @@ The first build attempt failed because the bundled toolchains put an older Bison
 
 These historical development artifacts belong to the initial fork snapshot, with the existing upstream version number. Later builds replace them; use the current local verification report for current hashes. No stable release or GitHub Pages firmware publication was performed. Build-Test publishes reviewable workflow artifacts separately from a stable release.
 
-The first fork push was published as commit `77736caa53b7ff4ab1df177e85aae6992d072059`. GitHub-hosted [Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785627), [Shell regressions](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785711) and [CodeQL](https://github.com/dev-zetta/LSCamoflash/actions/runs/38203785666) jobs were rejected before any steps began because of an account execution restriction. Remote CI acceptance is therefore outstanding; the completed checks in this report were run locally.
+The first fork push was published as commit `77736caa53b7ff4ab1df177e85aae6992d072059`. Its hosted jobs were rejected before any steps began because of an account execution restriction, so that checkpoint relied on local verification. Those obsolete runs were later deleted; hosted CI acceptance was established for v1.03.2413 as recorded above.
 
 ## Exact-camera compatibility validation
 

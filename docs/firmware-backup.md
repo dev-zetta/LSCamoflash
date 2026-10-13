@@ -6,32 +6,31 @@ The kit does not erase, program or restore flash. Stock startup itself copies th
 
 Backups, configuration archives and logs can contain Wi-Fi, cloud and device credentials. Keep the complete result in private storage. Share the public scripts and redacted technical findings, not your firmware dump or raw logs.
 
-## Build the kit
+## Download or build the kit
 
-From a built checkout, run:
+Download `LSCamoflash-<version>-backup-kit.tar.gz` and `SHA256SUMS` from the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest), verify the archive against its checksum, and extract it into a new folder. The kit contains `card/`, `verify-backup.py`, instructions, a manifest and checksums. It requires no runtime installation or compilation. Python 3.9 or later is needed for host verification.
 
-```sh
-python3 tools/firmware-backup/build-kit.py
-```
-
-This uses the repository's ARM uClibc compiler and built static BusyBox, and writes a separate generated directory at `SOURCE/backup-kit/`. To build its dependencies first, use `make -C SOURCE backup-kit`. Both commands only create host-side files. Python 3.9 or later is required. The [tool guide](../tools/firmware-backup/README.md#build) describes compiler/BusyBox overrides and optional ARM926 QEMU checks.
-
-The generated `card/` directory contains `hostapd`, `busybox`, `dump.sh`, `_ht_ap_mode.conf`, `_ht_get_log.conf` and `SHA256SUMS`. The native ARM launcher and BusyBox are built locally; no stock proprietary binary is included. Check the generated files before using them:
+The archive contains a versioned top-level directory. Set `KIT_DIR` to that directory, replacing the example version with the release you downloaded:
 
 ```sh
-(cd SOURCE/backup-kit/card && sha256sum -c SHA256SUMS)
+KIT_DIR="$PWD/LSCamoflash-1.03.2413-backup-kit"
+(cd "$KIT_DIR/card" && sha256sum -c SHA256SUMS)
 ```
+
+For a source build instead, follow [Building and testing](building.md), then run `make -C SOURCE backup-kit` from the repository root. This creates host-side files in `SOURCE/backup-kit/`; set `KIT_DIR="$PWD/SOURCE/backup-kit"`. The [tool guide](../tools/firmware-backup/README.md#build) describes compiler/BusyBox overrides and optional ARM926 checks.
+
+The `card/` payload contains `hostapd`, `busybox`, `dump.sh`, `_ht_ap_mode.conf`, `_ht_get_log.conf` and `SHA256SUMS`. Only these card files belong on the SD root; keep the host verifier on your computer. The kit includes no proprietary stock firmware.
 
 ## Prepare a spare card
 
-Use a spare, mounted FAT32 microSD card with sufficient free space; 512 MiB free is a conservative allowance within this kit's bounded collection limits. The verified camera accepted a whole-device FAT32 card without a partition table. A FAT32 first partition is also understood by its stock mount script. This backup procedure does not need LSCamoflash's two-partition runtime layout. Do not run the destructive runtime installer or disk preparation script merely to take a backup.
+Use a spare, mounted FAT32 microSD card with sufficient free space. For the tested camera with 8 MiB of exposed NOR, allow at least 512 MiB free. Other accepted partition inventories can require more; the dumper calculates its reserve and refuses insufficient space. The verified camera accepted a whole-device FAT32 card without a partition table. A FAT32 first partition is also understood by its stock mount script. This backup procedure does not need LSCamoflash's two-partition runtime layout. Do not run the destructive runtime installer or disk preparation script merely to take a backup.
 
-With the camera powered off and the spare card mounted on the computer, copy only the generated `card/` contents to its root. Use your actual mount path below. The interactive copy protects existing filenames from silent replacement; use a clean spare card if it already contains another `hostapd` hook or firmware update files.
+With the camera powered off and the spare card mounted on the computer, copy only the kit's `card/` contents to its root. Use your actual mount path below. The interactive copy protects existing filenames from silent replacement; use a clean spare card if it already contains another `hostapd` hook or firmware update files.
 
 ```sh
 CARD_MOUNT="/media/your-user/CAMERA"
-cp -i SOURCE/backup-kit/card/hostapd SOURCE/backup-kit/card/busybox SOURCE/backup-kit/card/dump.sh SOURCE/backup-kit/card/SHA256SUMS "$CARD_MOUNT/"
-cp -i SOURCE/backup-kit/card/_ht_ap_mode.conf SOURCE/backup-kit/card/_ht_get_log.conf "$CARD_MOUNT/"
+cp -i "$KIT_DIR/card/hostapd" "$KIT_DIR/card/busybox" "$KIT_DIR/card/dump.sh" "$KIT_DIR/card/SHA256SUMS" "$CARD_MOUNT/"
+cp -i "$KIT_DIR/card/_ht_ap_mode.conf" "$KIT_DIR/card/_ht_get_log.conf" "$CARD_MOUNT/"
 (cd "$CARD_MOUNT" && sha256sum -c SHA256SUMS)
 sync
 ```
@@ -45,7 +44,7 @@ Do not copy firmware update `.bin` files, `update.tar` or recovery markers to th
 3. Copy the entire `firmware-backup/` directory and root diagnostic log into private host storage. Retain failed attempts too. Verify the chosen run with the host-side script:
 
 ```sh
-python3 tools/firmware-backup/verify-backup.py "/private/path/firmware-backup/run-TIMESTAMP-PID"
+python3 "$KIT_DIR/verify-backup.py" "/private/path/firmware-backup/run-TIMESTAMP-PID"
 ```
 
 A successful command exits zero and reports `verified: true`, the partition count, total bytes and individual SHA-256 hashes. On the tested unit, `status.txt` reported `VERIFIED_NOR_BACKUP`, eight partitions and 8 MiB. The verifier checks the complete recorded inventory and archive payloads without executing or extracting the recovered firmware. A partial archive or a nonzero exit is not a verified backup. Keep the paired partition files and metadata together; do not concatenate them into a guessed flash image.
@@ -65,6 +64,8 @@ sync
 The exact tested firmware checks these marker names only at the card root. Nested diagnostic files and backups therefore do not reactivate this hook. Keep the backup output; deleting it is unnecessary. Safely eject the card, cold-boot the camera, and check normal app access, Wi-Fi and recordings. These acceptance checks and restoration are separate from successful backup verification.
 
 ## Developer checks
+
+The following commands are for a source checkout; see [Building and testing](building.md) for its dependencies.
 
 The [public fixtures](../tests/) synthesize devices, mounts and partition contents. They do not read real MTD devices, mount cards or require the private firmware dump:
 

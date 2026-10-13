@@ -1,73 +1,19 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported versions
 
-LSCamoflash is actively developed.  
-Security fixes are provided **only for the latest release**.
+Security fixes target the [latest fork release](https://github.com/dev-zetta/LSCamoflash/releases/latest). Check whether a newer release already addresses the problem before reporting it.
 
-| Version | Supported |
-|--------|-----------|
-| Latest release | ✅ |
-| Older releases | ❌ |
+## Report a vulnerability privately
 
-Please update to the latest version before reporting security issues.
+Use **[Report a vulnerability](https://github.com/dev-zetta/LSCamoflash/security/advisories/new)** in this fork's GitHub Security Advisories. Private vulnerability reporting is enabled. Do not include exploit details or credentials in public issues.
 
----
+Include the affected component, LSCamoflash version, exact camera firmware, reproduction steps, expected impact and a minimal proof of concept where available. Remove unrelated credentials and device identifiers. Reports are handled by volunteer maintainers; response times are not guaranteed.
 
-## Reporting a Vulnerability
-
-If you discover a security vulnerability in LSCamoflash,  
-**please do not open a public GitHub issue.**
-
-Instead, report it responsibly using one of the following methods:
-
-- 📧 **Email:** security@bunkerschild.de  
-  (preferred, encrypted communication welcome)
-- 🔒 GitHub Security Advisories (if enabled)
-
-Please include:
-- A clear description of the issue
-- Affected component(s)
-- Steps to reproduce (if possible)
-- Potential impact
-- Any proof-of-concept (optional)
-
-We aim to acknowledge reports within **72 hours**.
-
----
-
-## Responsible Disclosure
-
-We kindly ask security researchers to follow responsible disclosure practices:
-- Do not publicly disclose vulnerabilities before a fix is available
-- Allow reasonable time for investigation and mitigation
-
-We appreciate your effort in improving the security of this project.
-
----
+Allow time for investigation and a fix before public disclosure. Coordinate any disclosure through the private report.
 
 ## Scope
 
-This security policy applies to:
-- LSCamoflash core components
-- Build system and scripts
-- Web interface and services included in the firmware package
+This policy covers the fork's build and backup scripts, SD runtime, web interface and packaged service integration. Vendor firmware, third-party projects and cloud services may need reports to their respective maintainers; describe their role when relevant.
 
-It does **not** apply to:
-- Original vendor firmware
-- Third-party software components outside our control
-- Misuse, misconfiguration, or unsupported modifications
-
----
-
-## Security Measures
-
-LSCamoflash includes the following security practices:
-- Automated builds and releases
-- Static code analysis (CodeQL)
-- No cloud dependency introduced by LSCamoflash
-- Non-invasive approach (original firmware remains untouched)
-
----
-
-Thank you for helping to keep LSCamoflash secure.
+The SD runtime uses the camera's stock boot hook and does not imply that persistent settings remain untouched. Keep HTTP, Telnet, FTP and unauthenticated RTSP on a trusted network, replace default passwords and disable unused services. See [configuration](docs/configuration.md#passwords-and-services) for the actual account and service defaults.

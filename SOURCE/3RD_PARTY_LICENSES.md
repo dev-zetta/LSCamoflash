@@ -1,7 +1,7 @@
 # License Information
 
 Project: LSCamoflash
-URL: https://github.com/Bunkerschild/LSCamoflash
+URL: https://github.com/dev-zetta/LSCamoflash
 License: see LICENSE.MIT
 
 This project includes various third-party software packages, each with its own licensing terms. Below is a list of included packages and their respective licenses. Please ensure compliance with the licensing terms when redistributing or modifying this software.

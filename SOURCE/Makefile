@@ -1,6 +1,6 @@
 # Projekt URLs
-PROJECT_URL := https://github.com/Bunkerschild/LSCamoflash
-DOWNLOAD_URL := https://media.githubusercontent.com/media/Bunkerschild/LSCamoflash/main/SOURCE/download
+PROJECT_URL := https://github.com/dev-zetta/LSCamoflash
+DOWNLOAD_URL := https://media.githubusercontent.com/media/dev-zetta/LSCamoflash/main/SOURCE/download
 
 # Keep build phases ordered; individual packages compile in parallel.
 .NOTPARALLEL:
@@ -1057,7 +1057,7 @@ radare2-clean:
 $(PACKAGES_DIR)/$(GLIBC)/build/config.status: $(STAGING_DIR)/$(SDROOT)/.kernelheaders
 	@mkdir $(PACKAGES_DIR)/$(GLIBC)/build || true
 	@cd $(PACKAGES_DIR)/$(GLIBC)/build; ../configure --prefix=$(SDROOT) --host=$(HOST) --disable-timezone-tools --enable-kernel=4.4.192 \
-	--disable-crypt --disable-build-nscd --with-bugurl=https://github.com/Bunkerschild/LSCamoflash --with-arch=armv5te --with-tune=arm926ej-s \
+	--disable-crypt --disable-build-nscd --with-bugurl=$(PROJECT_URL) --with-arch=armv5te --with-tune=arm926ej-s \
 	--with-headers=$(STAGING_DIR)/$(SDROOT)/usr/include --with-default-link --disable-multi-arch \
 	CFLAGS="-nostdinc -I$(STAGING_DIR)/$(SDROOT)/usr/include -O2 --sysroot=$(TOOLCHAIN_PATH)/$(HOST)/sysroot" LDFLAGS="-nostdlib"
 	@touch $@

@@ -3,7 +3,7 @@
 Thank you for your interest in contributing to LSCamoflash.
 
 This project focuses on **local-first, non-invasive firmware extensions** for IP cameras.
-Please read the guidelines below to ensure efficient collaboration.
+Please read the guidelines below to ensure efficient collaboration. The [building and testing guide](docs/building.md) covers dependencies, local verification and the ARM regression suite.
 
 ---
 
@@ -27,7 +27,7 @@ Out of scope:
 ## How to Contribute
 
 ### 1. Issues
-- Use GitHub Issues for:
+- Use this fork's [GitHub Issues](https://github.com/dev-zetta/LSCamoflash/issues) for:
   - Bug reports
   - Feature requests
   - Compatibility reports
@@ -38,7 +38,7 @@ Out of scope:
   - Logs or error messages (if available)
 
 **Do not report security vulnerabilities via public issues.**  
-See `SECURITY.md` for responsible disclosure.
+See [SECURITY.md](SECURITY.md) for responsible disclosure.
 
 ---
 
@@ -68,8 +68,7 @@ PR requirements:
 
 ## Licensing
 
-By contributing to this project, you agree that your contributions
-will be licensed under the **MIT License**, unless stated otherwise.
+By contributing to this project, you agree that your contributions will be licensed under the **MIT License**, unless stated otherwise. Third-party components retain their own licenses.
 
 ---
 

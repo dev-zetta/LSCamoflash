@@ -1,165 +1,81 @@
 # LSCamoflash
 
-Dieser Fork integriert die Upstream-PRs #5, #6, #8 und #9. Hinweise zu offenen Issues, lokalem RTSP und Tests stehen in den [Integrations- und Kompatibilitätsnotizen](docs/integration.md) (Englisch). Die folgenden Download-Links führen zu Upstream-Builds ohne die Änderungen dieses Forks.
-
-LSCamoflash ist ein modifiziertes Firmware-Paket für bestimmte IP-Kameras, das zusätzliche Funktionen und Verbesserungen bietet.
-
-- [LSCamoflash Github-Seite](https://bunkerschild.github.io/LSCamoflash/)
-- [Download aktuelles Autobuild Voll-Paket](https://bunkerschild.github.io/LSCamoflash/autobuild/LSCamoflash-Autobuild.tar.gz)
-- [Download aktuelles Autobuild Update-Paket](https://bunkerschild.github.io/LSCamoflash/autobuild/update-autobuild.tgz)
-- [Download aktuelles Release](https://github.com/Bunkerschild/LSCamoflash/releases/latest)
-
-[![GitHub stars](https://img.shields.io/github/stars/Bunkerschild/LSCamoflash.svg)](https://github.com/Bunkerschild/LSCamoflash/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/Bunkerschild/LSCamoflash.svg)](https://github.com/Bunkerschild/LSCamoflash/network)
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/Bunkerschild/LSCamoflash.svg)](https://github.com/Bunkerschild/LSCamoflash/releases)
-[![GitHub downloads](https://img.shields.io/github/downloads/Bunkerschild/LSCamoflash/total.svg)](https://github.com/Bunkerschild/LSCamoflash/releases)
-[![Last commit](https://img.shields.io/github/last-commit/Bunkerschild/LSCamoflash.svg)](https://github.com/Bunkerschild/LSCamoflash/commits/main)
-[![Security Policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
-
+[![Release](https://img.shields.io/github/v/release/dev-zetta/LSCamoflash)](https://github.com/dev-zetta/LSCamoflash/releases/latest)
 [![Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml)
-[![Create Stable Release](https://github.com/dev-zetta/LSCamoflash/actions/workflows/release.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/release.yml)
-[![CodeQL Advanced](https://github.com/dev-zetta/LSCamoflash/actions/workflows/codeql.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/codeql.yml)
-[![Deploy GitHub Pages](https://github.com/dev-zetta/LSCamoflash/actions/workflows/jekyll-gh-pages.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/jekyll-gh-pages.yml)
+[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-green.svg)](LICENSE)
 
-Sicherheitsprobleme sollten verantwortungsvoll gemeldet werden. Siehe SECURITY.md.
+LSCamoflash erweitert unterstützte LSC-/Tuya-IP-Kameras über eine SD-Karte um eine Weboberfläche, lokale Videostreams und konfigurierbare Dienste. Welche Funktionen verfügbar sind, hängt vom Kameramodell und der genauen Firmware ab.
 
-## Inhaltsverzeichnis
+Dieser Fork enthält Fehlerkorrekturen, einen dokumentierten Firmware-Backup-Weg und Unterstützung für die unten aufgeführte LSC Smart PTZ Camera.
 
-- [Haftungsausschluss](#haftungsausschluss)
-- [Installation](#installation)
-- [Build-Umgebung einrichten](#build-umgebung-einrichten)
-- [Verfügbare Tools](#verfügbare-tools)
-- [Passwortverwaltung](#passwortverwaltung)
-- [Webserver-Funktionen](#webserver-funktionen)
-- [Update-Mechanismus](#update-mechanismus)
-- [SD-Karten-Partitionierung](#sd-karten-partitionierung)
-- [Geplante Verbesserungen](#geplante-verbesserungen)
-- [Support](#support)
+**[Aktuelles Release herunterladen](https://github.com/dev-zetta/LSCamoflash/releases/latest)** · [Dokumentation](docs/index.md) · [Änderungen](CHANGELOG.md) · [English](README.md)
 
-## Haftungsausschluss
+## Was bietet LSCamoflash?
 
-**WARNUNG:** Dieses Projekt modifiziert die Firmware und kann die Gerätegarantie ungültig machen. Nutzung auf eigene Gefahr.
+- Eine Weboberfläche für Einstellungen, Dienstverwaltung und Neustart der Kamera.
+- Lokale RTSP-Streams ohne Tuya-Cloud im unterstützten lokalen Betriebsmodus.
+- ONVIF-Anbindung für unterstützte Kameraprofile.
+- Konfigurierbares WLAN und optionale Dienste auf der SD-Karte.
+- Ein separates Backup-Kit zum Sichern der Original-Firmware einer unterstützten Kamera.
 
-- **Keine Haftung:** Die Autoren übernehmen keine Verantwortung für Schäden, Datenverlust, beschädigte Hardware oder andere Schäden, die sich aus der Verwendung dieser Software ergeben.
-- **Bereitstellung im "Ist-Zustand":** Diese Software wird "wie vorhanden" ohne jegliche Gewährleistungen oder Garantien bereitgestellt.
-- **Nutzung auf eigene Gefahr:** Durch die Verwendung von LSCamoflash bestätigen Sie, dass Sie die damit verbundenen Risiken verstehen und die volle Verantwortung für alle Folgen übernehmen.
-- **Hardware-Risiko:** Das Flashen von Firmware kann Ihr Gerät dauerhaft beschädigen, wenn etwas schiefgeht. Stellen Sie sicher, dass Sie ein Backup haben und den Prozess verstehen, bevor Sie fortfahren.
-- **Datenverlust:** Sichern Sie immer wichtige Daten, bevor Sie diese Firmware verwenden. Wir sind nicht für Datenverlust verantwortlich.
-- **Nur autorisierte Nutzung:** Diese Software darf nur auf Geräten verwendet werden, die Sie besitzen oder für deren Modifizierung Sie ausdrückliche Genehmigung haben. Unbefugter Zugriff auf Computersysteme ist illegal. Der Versuch, diese Firmware für unbefugten Zugriff auf oder Kontrolle über Geräte zu nutzen, auf die Sie kein Eigentumsrecht haben oder für die Sie keine Genehmigung haben, ist ausdrücklich untersagt und kann gegen geltende Gesetze verstoßen, einschließlich des Strafgesetzbuches (StGB) § 202a (Ausspähen von Daten), § 263a (Betrug) und ähnlicher Regelungen in Ihrer Jurisdiktion.
-- **Kein böswilliger Einsatz:** Dieses Projekt darf nicht zur Erstellung von Malware, Spyware oder anderer bösartiger Software verwendet werden, die darauf abzielt, die Gerätesicherheit zu gefährden, Kommunikation abzufangen oder andere zu schädigen.
-- **Rechtliche Verantwortung des Nutzers:** Nutzer sind allein dafür verantwortlich, sicherzustellen, dass ihre Nutzung von LSCamoflash mit allen geltenden Gesetzen und Vorschriften ihrer Jurisdiktion konform ist. Die Autoren lehnen jegliche Haftung für illegale Nutzung oder deren Folgen ab.
+## Unterstützte Kameras
 
-Bitte lesen Sie die [Verwendungsrichtlinie](SOURCE/USAGE_POLICY.md) für vollständige rechtliche Details.
+Die Unterstützung richtet sich nach der **genauen Firmware**, nicht allein nach dem Produktnamen. Ähnlich aussehende Kameras können andere Hardware oder Firmware verwenden.
 
-## Installation
+| Getestete Kamera | Original-Firmware | Auf dem Gerät bestätigt |
+| --- | --- | --- |
+| LSC Smart PTZ Camera, SI L25502, Artikel 3007325.5 | `6.2863.125.1348` (App: V1.0.0 / 6.2863.125) | Firmware-Backup, SD-Start, WLAN, Weboberfläche, lokale H.265-/H.264-Streams mit PCMA-Mikrofonton und manuelle ONVIF-Anbindung |
 
-1. **Quellcode herunterladen:**
+Dieses Profil ist experimentell. Die PTZ-Steuerung durch LSCamoflash ist für diese Firmware deaktiviert. Automatische ONVIF-Erkennung ist nicht enthalten; fügen Sie die Kamera manuell hinzu. Langzeitbetrieb und detaillierte Audio-/Videosynchronisation sind noch nicht bestätigt.
 
-   ```bash
-   git clone https://github.com/dev-zetta/LSCamoflash.git
-   cd LSCamoflash/SOURCE
-   ```
+Der lokale RTSP-Modus ersetzt bei diesem Profil den normalen Tuya-Betrieb und benötigt ausdrücklich konfigurierte WLAN-Zugangsdaten. Die vollständigen Voraussetzungen, Adressen und Grenzen stehen im [Leitfaden für 3007325.5](docs/camera-3007325.5.md).
 
-2. **Build-Prozess starten:**
+Weitere Profile und den Stand früherer Fehlerberichte beschreibt die [Kompatibilitätsübersicht](docs/integration.md).
 
-   - Um alle Komponenten herunterzuladen und zu kompilieren:
+## Erste Schritte
 
-     ```bash
-     make
-     ```
+1. **Modell und Firmware prüfen.** Vergleichen Sie Ihre Kamera mit der [Kompatibilitätsübersicht](docs/integration.md) und dem passenden Kameraleitfaden.
+2. **Original-Firmware sichern.** Folgen Sie der [Backup-Anleitung](docs/firmware-backup.md) mit einer separaten SD-Karte und bewahren Sie die Sicherung privat auf.
+3. **Das Vollpaket herunterladen.** Wählen Sie im [aktuellen Release](https://github.com/dev-zetta/LSCamoflash/releases/latest) die Datei `LSCamoflash-<version>-uclibc.tar.gz`.
+4. **Die Laufzeit-SD-Karte vorbereiten.** Die [Installationsanleitung](docs/installation.md) erklärt das Entpacken, die Kartenlayouts und die Installationsskripte.
+5. **Betriebsmodus und WLAN einrichten.** Nutzen Sie die [Konfigurationsanleitung](docs/configuration.md) und beachten Sie die Vorgaben Ihres Kameraprofils.
+6. **Kamera starten und prüfen.** Setzen Sie die sicher ausgeworfene Karte bei ausgeschalteter Kamera ein. Prüfen Sie anschließend die zugewiesene IP-Adresse und öffnen Sie `http://<kamera-ip>:8080/`.
 
-     oder
+Der erste Start kann mehrere Minuten dauern. Schalten Sie die Kamera aus, bevor Sie die Karte entfernen. Falls der Start scheitert, folgen Sie den Diagnosehinweisen im jeweiligen Kameraleitfaden.
 
-     ```bash
-     make all
-     ```
+## Welchen Download brauche ich?
 
-   - Nach erfolgreichem Build befindet sich der Inhalt für die SD-Karte im `build/`-Verzeichnis, einschließlich der Installationsskripte `install.ps1` (für Windows) und `install.sh` (für Unix/Linux).
+| Datei im Release | Verwendung |
+| --- | --- |
+| `LSCamoflash-<version>-uclibc.tar.gz` | Vollpaket für die erste Installation auf der Laufzeit-SD-Karte. |
+| `update-<version>-uclibc.tgz` | Update einer vorhandenen Installation nach der [Update-Anleitung](docs/configuration.md). |
+| `LSCamoflash-<version>-backup-kit.tar.gz` | Separates Kit für die [Original-Firmware-Sicherung](docs/firmware-backup.md); keine Laufzeitinstallation. |
+| `SHA256SUMS` | Prüfsummen zur Kontrolle der heruntergeladenen Dateien. |
 
-3. **Release erstellen:**
+Die GitHub-Dateien „Source code (zip)“ und „Source code (tar.gz)“ sind **keine fertigen SD-Karten-Pakete**. Der zusätzliche Release-Quellcode und Informationen zum Selbstbauen sind in der [Build-Anleitung](docs/building.md) beschrieben.
 
-   - Um ein komprimiertes Tarball des `build/`-Verzeichnisses zu erstellen:
+## Dokumentation
 
-     ```bash
-     make release
-     ```
+Die ausführlichen Anleitungen werden auf Englisch gepflegt.
 
-     Dies erzeugt eine gz-komprimierte Tar-Datei für die Verteilung.
+- [Dokumentationsübersicht](docs/index.md)
+- [Installation und SD-Karten](docs/installation.md)
+- [Einstellungen, Dienste und Updates](docs/configuration.md)
+- [Original-Firmware sichern](docs/firmware-backup.md)
+- [LSC Smart PTZ 3007325.5: Einrichtung und bekannte Grenzen](docs/camera-3007325.5.md)
+- [Kompatibilität, integrierte Änderungen und offene Punkte](docs/integration.md)
+- [Selbst bauen und testen](docs/building.md)
+- [Release-Pakete und Veröffentlichung](docs/release.md)
+- [Changelog](CHANGELOG.md)
 
-## Build-Umgebung einrichten
+## Hilfe und Fehlerberichte
 
-Für den Build-Prozess werden folgende Pakete benötigt:
+Melden Sie Probleme im [Issue-Tracker dieses Forks](https://github.com/dev-zetta/LSCamoflash/issues). Nennen Sie Modell, genaue Firmware, Release-Version und die Schritte bis zum Fehler. Entfernen Sie Passwörter, WLAN-Zugangsdaten und Geräte- oder Kontokennungen aus beigefügten Logs.
 
-- `build-essential`: Grundlegende Compiler-Werkzeuge
-- `flex`: Scanner-Generator
-- `bison`: Parser-Generator
-- `gsoap`: SOAP-Code-Generator (erforderlich für `onvif_srvd`)
-- `binutils`: Sammlung von Binärwerkzeugen
-- `make`: Build-Automatisierungstool
-- `automake`: Tool zur Generierung von Makefiles
-- `autoconf`: Tool zur Konfiguration von Softwarepaketen
+Weitere Hinweise finden Sie unter [Support](SUPPORT.md). Sicherheitsprobleme melden Sie bitte gemäß der [Sicherheitsrichtlinie](SECURITY.md).
 
-**Hinweis:** Stellen Sie sicher, dass alle Abhängigkeiten installiert sind, um einen reibungslosen Build zu gewährleisten.
+## Lizenz und Herkunft
 
-## Verfügbare Tools
+LSCamoflash steht unter der [MIT-Lizenz](LICENSE). Enthaltene Komponenten haben eigene Lizenzen; siehe [Drittanbieter-Lizenzen](SOURCE/3RD_PARTY_LICENSES.md). Beachten Sie auch die [Nutzungsrichtlinie](SOURCE/USAGE_POLICY.md). Die Nutzung erfolgt ohne Gewährleistung; eine gesicherte Firmware ist kein Nachweis für eine funktionierende Wiederherstellung.
 
-Nach der Installation stehen folgende Tools zur Verfügung:
-
-- `busybox`: Sammlung von Unix-Werkzeugen
-- `chpasswd`: Passwortänderungstool
-- `curl`: Datenübertragungswerkzeug
-- `joe` (inkl. `jmacs`, `jpico`, `jstar`, `rjoe`): Texteditor
-- `mosquitto` (inkl. `mosquitto_pub`, `mosquitto_sub`, `mosquitto_passwd`, `mosquitto_rr`): MQTT-Broker und -Clients
-- `motor`: CLI PTZ Steuerung
-- `msmtp` und `msmtpd`: SMTP-Client und -Server
-- `openssl`: Toolkit für SSL/TLS
-- `pcap-config`: Werkzeug zur Abfrage von libpcap-Konfigurationsdetails
-- `sqlcipher`: Verschlüsselte SQLite-Datenbank
-- `sqlite3`: SQLite-Datenbank-Client
-- `strace` (inkl. `strace-log-merge`): Systemaufruf-Überwachung
-- `tcpdump`: Netzwerkpaket-Analysator
-- `upnpc`: UPnP-Client
-- `onvif_srvd`: ONVIF-Geräteserver
-
-## Passwortverwaltung
-
-Um das Passwort für verschiedene Dienste (z.B. HTTP-Server) zu ändern, verwenden Sie `chpasswd`. Dies stellt sicher, dass die Passwortänderung persistent ist und nach einem Neustart erhalten bleibt.
-
-**Hinweis:** Das `passwd`-Tool von `busybox` ändert das Passwort nur temporär und ist nicht für alle Dienste wirksam.
-
-## Webserver-Funktionen
-
-Der integrierte Webserver bietet folgende Funktionen:
-
-- **Streaming:** Bereitstellung eines HLS-Streams über einen TUYA-Cloud API-Schlüssel sowie Abruf von RTSP- und FLV-Stream-URLs.
-- **Kamerasteuerung:** Anpassung von Kameraeinstellungen und Neustart der Kamera über den HTTP-Dienst auf Port 8080 (konfigurierbar).
-- **Dienstverwaltung:** Aktivierung oder Deaktivierung von Diensten wie FTP oder `crond` über eine zentrale Konfigurationsdatei.
-
-## Update-Mechanismus
-
-Ein integriertes Update-Skript hält die Kamera auf dem neuesten Stand. Funktionen des Update-Mechanismus:
-
-- **Anpassbarer Update-Server:** Der Server kann in der Konfiguration festgelegt werden.
-- **Flexible Update-Strategien:** Updates können global, gruppenbasiert oder individuell pro Kamera-ID bereitgestellt werden.
-- **Versionsprüfung:** Vor einem Update wird die aktuelle Versionsnummer der Kamera mit dem Server abgeglichen, um inkrementelle Updates zu ermöglichen.
-
-## SD-Karten-Partitionierung
-
-Die SD-Karte ist so partitioniert, dass eine Formatierung über die TUYA-App den Hack nicht entfernt:
-
-- **Mehrere Partitionen:** Die erste Partition (`mmcblk0p1`) wird formatiert, während die zweite Partition (`mmcblk0p2`) die wichtigen Daten enthält.
-- **Automatische Wiederherstellung:** Ein Skript (`services.sh`) überprüft alle 30 Sekunden den Zustand der Partitionen und stellt sicher, dass notwendige Dateien nach einer Formatierung automatisch wiederhergestellt werden.
-
-**Hinweis:** Vermeiden Sie es, die Kamera innerhalb von 1 Minute nach einer Formatierung neu zu starten, um die automatische Wiederherstellung zu gewährleisten. Sollte dies dennoch geschehen, können die erforderlichen Dateien manuell auf die erste Partition kopiert werden.
-
-## Geplante Verbesserungen
-
-- **Implementierung von Checksummen:** In zukünftigen Versionen werden für externe Downloads Checksummen verwendet, um die Integrität der Dateien sicherzustellen.
-- **Überarbeitung von `strace-log-merge`:** Dieses Tool wird aktuell nur für interne Zwecke genutzt und könnte in späteren Versionen entfernt werden.
-- **Verkürzung des Überwachungsintervalls:** Derzeit überprüft `services.sh` alle 30 Sekunden den Zustand der Partitionen. Es ist geplant, dieses Intervall in zukünftigen Versionen zu verkürzen, um eine schnellere Wiederherstellung zu ermöglichen.
-
-## Support
-
-Weitere Informationen finden Sie in der Datei SUPPORT.md.
+Dieser Fork baut auf [Bunkerschild/LSCamoflash](https://github.com/Bunkerschild/LSCamoflash) und den Beiträgen seiner Mitwirkenden auf. Die Downloads und der Issue-Tracker oben gehören zu diesem Fork.

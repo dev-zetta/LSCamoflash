@@ -2,37 +2,30 @@
 layout: default
 ---
 
-# 👁️‍🗨️ LSCamoflash
+# LSCamoflash documentation
 
-Download [fork release 1.03.2413](https://github.com/dev-zetta/LSCamoflash/releases/tag/v1.03.2413) and read the [changelog](https://github.com/dev-zetta/LSCamoflash/blob/v1.03.2413/CHANGELOG.md). For current evidence and setup, read the [verified NOR backup procedure](./firmware-backup.md), [experimental 3007325.5 runtime guide](./camera-3007325.5.md) and [integration notes](./integration.md). The documented camera has accepted firmware backup, network/web access, both local RTSP video/audio streams and manual ONVIF substream selection. The user confirmed audible microphone sound. Detailed audio/video synchronization, custom PTZ and long-term operation remain separate device tests. Automatic ONVIF discovery is not bundled. The release notes below describe legacy upstream features, and upstream release downloads do not include this fork's changes.
+Start with a published package from the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest). For a new installation, choose the full `LSCamoflash-<version>-uclibc.tar.gz` runtime archive and `SHA256SUMS`. The GitHub source ZIP is for development and is not ready to copy to a camera.
 
-LSCamoflash is a modified firmware package for LSC Tuya based IP cameras that adds powerful features like local-only operation, cloud-free RTSP streaming, camera control via web UI, and more.
+## Set up your camera
 
-🚀 Now with PHP & Python CLI/Web support, FFMPEG integration, ONVIF PTZ control, SD card auto-recovery and optional `radare2` for advanced tinkering.
+1. Check the [compatibility and integration notes](integration.md) and your exact firmware revision.
+2. Follow the [firmware backup guide](firmware-backup.md) before runtime installation where supported.
+3. Use the [installation guide](installation.md) to choose a card layout and complete the first boot.
+4. Read [configuration and everyday use](configuration.md) for passwords, services and streaming.
 
-## 🔧 Highlights
+The [LSC Smart PTZ 3007325.5 / SI L25502 guide](camera-3007325.5.md) covers firmware 6.2863.125.1348. Backup, Wi-Fi, web UI access, local H.265/H.264 video and PCMA microphone audio have been verified on that camera. ONVIF works through manual connection to its H.264 substream. Local mode replaces Tuya app operation; automatic discovery and toolkit PTZ are unavailable for this profile, and long-term stability remains unverified.
 
-- WebUI with settings and controls (incl. camera restart)
-- Cloud-independent streaming (RTSP, HLS, FLV)
-- Anyka IPC auto-patching for RTSP
-- ONVIF PTZ support
-- Automatic SD-card reinitialization after format
-- Configurable WLAN (independent from Tuya)
-- CLI/Web integration via PHP & Python
-- Optional `radare2` installation
+## Find a guide
 
-## 📦 Download Latest Release Version
+| Guide | Contents |
+| --- | --- |
+| [Installation](installation.md) | Packages, checksum verification, SD layouts and first login. |
+| [Configuration and everyday use](configuration.md) | Wi-Fi, passwords, services, streaming and updates. |
+| [Troubleshooting](troubleshooting.md) | Offline camera, playback problems and useful logs. |
+| [Firmware backup](firmware-backup.md) | Separate NOR backup kit and host verification. |
+| [3007325.5 camera](camera-3007325.5.md) | Exact firmware identity, local mode, diagnostics and device evidence. |
+| [Building and testing](building.md) | Linux dependencies, cross-compilation, verification and regression tests. |
+| [Integration and compatibility](integration.md) | Upstream PRs, issue disposition and historical validation. |
+| [Release notes](release.md) | Published packages and release limitations. |
 
-👉 [Download Latest Fork Release](https://github.com/dev-zetta/LSCamoflash/releases/latest)
-
-## 📚 Full Release Notes
-
-See the full [Release Notes](./release.md)
-
-## 🛠 Latest Autobuild
-
-⚠️ This is the latest development build. It is not tested as thoroughly as stable releases.
-
-👉 [Download LSCamoflash Autobuild](./autobuild/LSCamoflash-Autobuild.tar.gz)
-
-👉 [Download Update Package](./autobuild/update-autobuild.tgz)
+[Changelog](https://github.com/dev-zetta/LSCamoflash/blob/main/CHANGELOG.md) · [Report an issue](https://github.com/dev-zetta/LSCamoflash/issues) · [Source repository](https://github.com/dev-zetta/LSCamoflash) · [Contributing](https://github.com/dev-zetta/LSCamoflash/blob/main/CONTRIBUTING.md)

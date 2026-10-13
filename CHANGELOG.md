@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- Rework the English and German READMEs around compatibility, release downloads and first setup; move build instructions, configuration, SD layout and troubleshooting details into dedicated guides under `docs/`.
+- Correct fork download, badge, support, web UI, shell-banner and build-source links while retaining upstream attribution and original issue/PR references.
+- Document ready-made backup-kit downloads and separate web UI/root passwords; replace stale autobuild, camera-acceptance and deleted CI-run links.
+- Enable the fork's issue tracker and private vulnerability reporting, and point support/security instructions to those channels.
+
 ## [1.03.2413] - 2026-10-13
 
 First release of the `dev-zetta/LSCamoflash` fork, based on upstream 1.03.2412 and the subsequent upstream source history. Release packages, checksums and source are provided on the [v1.03.2413 release page](https://github.com/dev-zetta/LSCamoflash/releases/tag/v1.03.2413).

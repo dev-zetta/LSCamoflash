@@ -56,11 +56,7 @@ Decisions are made in the interest of project security, stability, and long-term
 
 ## Reporting
 
-If you experience or witness unacceptable behavior, please report it to:
-
-📧 **conduct@bunkerschild.de**
-
-All reports will be handled discreetly and reviewed fairly.
+For public moderation requests, contact the maintainers in the relevant [fork issue](https://github.com/dev-zetta/LSCamoflash/issues) or [pull request](https://github.com/dev-zetta/LSCamoflash/pulls). Do not post private information. This fork does not currently publish a dedicated private conduct-report contact; the original upstream email is not a contact for this fork. Security vulnerabilities use the separate [private security channel](SECURITY.md).
 
 ---
 
