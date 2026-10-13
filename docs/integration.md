@@ -195,3 +195,7 @@ These development archives supersede the previous hashes, retain the upstream ve
 | --- | ---: | --- |
 | `LSCamoflash-1.03.2412-uclibc.tar.gz` | 46,201,451 | `a155498e725db14af5f33d28a37488310ba187d1a8625393e221811043e3ab63` |
 | `update-1.03.2412-uclibc.tgz` | 45,771,263 | `91481e0e8d8b3be295506bc1747aec35776e62895661e331ebe1825e590f68be` |
+
+## Local audio limitation
+
+Following the user's report of silence on the H.265 stream, live RTSP/TCP packet checks on 2026-10-13 examined both endpoints for approximately eight seconds of media each. Both advertised an 8 kHz mono PCMA track, but delivered zero audio packets while delivering 123 main-stream and 117 substream video packets. The two probes exited zero without diagnostics; only packet metadata was saved, with no audio recording or camera configuration change. Common stock startup initializes audio machinery before entering mode 2, but that mode bypasses the Tuya capture startup that installs audio forwarding callbacks. The current helper installs video callbacks only, so local audio forwarding remains unimplemented and silence is expected in this mode. These results do not test microphone hardware. The runtime guide and documentation index now distinguish this known audio limitation from unverified hardware behavior; this documentation-only checkpoint does not change the installed SD files or development archive hashes above.
