@@ -110,7 +110,7 @@ Keep the complete run directory and its metadata together when transferring it t
 
 ## Experimental Fullhan status dashboard
 
-This isolated pilot displays the model, firmware, current LAN address, uptime, available RAM and stock RTSP links. It uses its own static BusyBox HTTP server and provides no camera settings, PTZ, reboot, firmware update or recording-deletion controls. The stock `dgiot` application continues to own the camera and its network configuration. The live checks below cover this exact firmware and the bounded manual pilot; browser/user acceptance and long-term operation remain separate.
+This isolated pilot displays the model, firmware, current LAN address, uptime, available RAM and stock RTSP links. It uses its own static BusyBox HTTP server and provides no camera settings, PTZ, reboot, firmware update or recording-deletion controls. The stock `dgiot` application continues to own the camera and its network configuration. The live checks below cover this exact firmware and the bounded manual pilot. The user subsequently confirmed the dashboard works; stock-app acceptance and long-term operation remain separate.
 
 ### Prepare the private payload
 
@@ -160,7 +160,24 @@ On **2026-10-14**, the dedicated SD payload passed its on-camera checksums and c
 
 With the pilot running, both stock RTSP endpoints decoded 45 frames over TCP, each with exit status zero and completed progress. The dashboard daemon reported **648 KiB resident RAM**, with **13,456 KiB available out of 31,320 KiB total RAM** at the final sample. No OOM message was found in the sampled kernel log. These are short measurements under the tested workload, not a long-term resource or app-connectivity guarantee. No footage was retained.
 
-The complete local regression suite passed **356 tests**, including the 14 Fullhan fixtures and optional ARM checks; the separate credential-free and private builds also passed ARM1176 emulation. Proprietary firmware, diagnostic output and site credentials remain private. Fresh physical SD-remount verification, restoration, browser/user acceptance, internet-blocked operation and cold-boot automatic startup have not been established.
+The complete local regression suite passed **356 tests**, including the 14 Fullhan fixtures and optional ARM checks; the separate credential-free and private builds also passed ARM1176 emulation. Proprietary firmware, diagnostic output and site credentials remain private. The user subsequently confirmed the dashboard works. Fresh physical SD-remount verification, restoration, stock-app acceptance, internet-blocked operation and cold-boot automatic startup have not been established.
+
+## Path to the Anyka management interface
+
+The camera has a nominal 32 MB of RAM; the kernel exposes **31,320 KiB (30.6 MiB)**. A later live status sample reported **13,416 KiB (13.1 MiB) available**, leaving an estimated **17.5 MiB in use**. The dashboard's available counter is headroom for applications, including reclaimable memory; it is not memory already consumed by LSCamoflash. The pilot HTTP daemon previously measured 648 KiB resident RAM. These samples support further lightweight management work, but each resident service and transient media operation still needs its own measurement.
+
+The existing Anyka interface can provide a shared appearance and navigation. Its static HTML, CSS and JavaScript live on the SD card and execute mainly in the user's browser. The current BusyBox HTTP and shell-CGI approach can serve a fuller interface without adding PHP or Python. The existing Anyka CGI handlers require adapters because they assume Anyka settings, session storage, recording paths, process names and media buffers.
+
+| Management area | Porting assessment |
+| --- | --- |
+| Status, network information, SD usage and RTSP links | Straightforward extensions of the working Fullhan status endpoint. |
+| Authentication, logs and recording downloads | Feasible with bounded, allowlisted paths and the camera's actual recording layout; keep backups and credentials private. |
+| ONVIF discovery and media profiles | Candidate for a separate service advertising the existing H.264 streams. Validate its libraries, authentication and memory on this exact platform before enabling it. Video transcoding is unnecessary for advertising those streams. |
+| Image settings, night vision, motion, audio and camera restart | Need validated `dgiot` configuration, IPC or driver adapters. Function-name strings in the binary are investigation clues, not callable or tested APIs. |
+| Motor controls | Require applicable motor hardware and its verified Fullhan interface; Anyka process offsets do not apply. |
+| Automatic startup | Still unresolved on the stock SD boot path; the pilot currently requires a manual start after reboot. |
+
+A practical sequence is the shared interface and generic status pages, then recordings/downloads, then a measured ONVIF service, followed by firmware-specific camera controls. Keep optional services disabled until they have passed their individual tests. Audio and snapshots can require substantially more transient media processing than serving the management page. This is a porting assessment, not a claim that these additional controls are implemented.
 
 ## What a Fullhan port still needs
 
