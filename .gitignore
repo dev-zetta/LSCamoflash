@@ -77,3 +77,5 @@ SOURCE/src/contrib/rtsp-callback/libcamoflash_rtsp.so
 
 # Generated Fullhan pilot and site-owned authentication
 SOURCE/fullhan-kit/
+SOURCE/fullhan-onvif/
+SOURCE/fullhan-busybox/

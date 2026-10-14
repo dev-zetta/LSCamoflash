@@ -29,16 +29,18 @@ jobs:
           make nproc=8 all backup-kit release update 2>&1 | tee ../.local/logs/build.log
       - name: Verify packaged ARM programs and archives
         run: python3 SOURCE/src/bin/verify-build.py --output .local/logs/artifact-verification.json
-      - name: Build separate credential-free Fullhan pilot with ARM1176 smoke
+      - name: Build separate credential-free Fullhan management and ONVIF with ARM1176 smoke
         env:
           QEMU_ARM: /usr/bin/qemu-arm
-        run: make -C SOURCE fullhan-kit
+        run: make -C SOURCE fullhan-busybox-kit fullhan-onvif-kit fullhan-kit FULLHAN_ONVIF_KIT="${{ github.workspace }}/SOURCE/fullhan-onvif"
       - name: Run regressions with ARM926 BusyBox ash and backup tools
         env:
           CAMOFLASH_RUNTIME_SHELL: /usr/bin/qemu-arm -cpu arm926 ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash
           BACKUP_ARM_CC: ${{ github.workspace }}/SOURCE/toolchain/uclibc/bin/arm-buildroot-linux-uclibcgnueabi-gcc
           BACKUP_ARM_BUSYBOX: ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox
           BACKUP_QEMU: /usr/bin/qemu-arm
+          FULLHAN_ONVIF_BIN: ${{ github.workspace }}/SOURCE/fullhan-onvif/bin/onvif_srvd
+          FULLHAN_ONVIF_QEMU: /usr/bin/qemu-arm
         shell: bash
         run: |
           set -euo pipefail

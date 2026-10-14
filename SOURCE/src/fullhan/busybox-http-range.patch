@@ -1,0 +1,14 @@
+--- a/networking/httpd.c
++++ b/networking/httpd.c
+@@ -2517,6 +2517,11 @@
+ 						range_start = -1;
+ 				}
+ 			}
++#if ENABLE_FEATURE_HTTPD_CGI
++			/* CGI owns its response ranges. Preserve the original header
++			 * through the existing bounded HTTP_* environment exporter. */
++			if (cgi_type == CGI_NONE)
++#endif
+ 			continue;
+ 		}
+ #endif

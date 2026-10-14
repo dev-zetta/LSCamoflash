@@ -1,6 +1,6 @@
 # LSC Indoor 1080p SZ B22705: experimental Fullhan support
 
-This camera already provides local RTSP video through its stock firmware. Its hardware, diagnostic shell and software backup were verified on **2026-10-14**. A separate, manually started Fullhan status dashboard passed live authentication, startup/shutdown and stock-stream coexistence checks on that date. It is not a complete camera-management runtime. Use the stock stream addresses below; do not install the Anyka runtime package or reuse the [3007325.5 camera profile](camera-3007325.5.md).
+This camera already provides local RTSP video through its stock firmware. Its hardware, diagnostic shell and software backup were verified on **2026-10-14**. An earlier, manually started status-only dashboard passed live authentication, startup/shutdown and stock-stream coexistence checks on that date. The richer management interface, recording browser and optional authenticated ONVIF service subsequently passed short live checks, including recording Range downloads and a standard ONVIF client. This remains experimental Fullhan support rather than a complete camera-management runtime. Use the stock stream addresses below; do not install the Anyka runtime package or reuse the [3007325.5 camera profile](camera-3007325.5.md).
 
 The observations apply to the tested **SZ B22705 running firmware 7.6.23**. Other cameras sold as “LSC Indoor 1080p” can use different hardware and firmware, including a later Anyka platform.
 
@@ -13,8 +13,11 @@ The observations apply to the tested **SZ B22705 running firmware 7.6.23**. Othe
 | Hardware and flash identification | CPU, kernel, libc, application identity, mounts and six NOR partitions inspected through the stock shell. |
 | Firmware backup | All six exposed NOR partitions collected with paired matching reads; the private host copy passed verification of 109 checksummed files. Physical SD remount and restoration remain untested. |
 | RTSP audio | Neither tested stream advertised an audio track. Microphone hardware and other audio paths have not been tested. |
-| Fullhan status dashboard | Authenticated page/API verified live; owned shutdown/restart preserved the original stock application and both RTSP streams. |
-| Camera settings, ONVIF and automatic SD startup | Not implemented for this Fullhan profile. |
+| Fullhan management interface | Expanded Dashboard, Recordings, Streams and Diagnostics pages and authenticated status/API access passed short live checks. |
+| Recording browser and downloads | Finalized-MP4 listing, authenticated HEAD and a verified 32-byte HTTP 206 Range response passed live checks. Browser codec/player compatibility remains client-dependent. |
+| Optional ONVIF | Direct port-5000 service passed WSSE, HTTP Digest and standard-client profile/stream-URI checks. Use `--no-discovery` and manual client setup; stock `dgiot` owns UDP 3702. |
+| Stock WS-Discovery | Response observed on UDP 3702 advertising port 835; an authenticated native SOAP control path there is unverified. |
+| Camera settings, PTZ, audio forwarding and automatic SD startup | Not implemented for this Fullhan profile. |
 
 Stock RTSP operation does not establish independence from Tuya services, successful operation with internet access blocked, or long-term stability. Those remain separate tests.
 
@@ -108,9 +111,11 @@ Before collection, confirm the exact application/hardware identity, the live NOR
 
 Keep the complete run directory and its metadata together when transferring it to the host, then run the [host verifier](../tools/firmware-backup/verify-backup.py). Check its exit status and `verified: true` result before treating the copy as a verified backup. Preserve failed attempts for diagnosis, and keep the additional checked file/directory flush and physical remount limits above separate from host checksum verification. Preparing the runtime or modifying startup files is unnecessary for this software backup path.
 
-## Experimental Fullhan status dashboard
+## Experimental Fullhan management interface
 
-This isolated pilot displays the model, firmware, current LAN address, uptime, available RAM and stock RTSP links. It uses its own static BusyBox HTTP server and provides no camera settings, PTZ, reboot, firmware update or recording-deletion controls. The stock `dgiot` application continues to own the camera and its network configuration. The live checks below cover this exact firmware and the bounded manual pilot. The user subsequently confirmed the dashboard works; stock-app acceptance and long-term operation remain separate.
+This isolated interface has **Dashboard**, **Recordings**, **Streams** and **Diagnostics** tabs. It reports the model, firmware, LAN address, uptime, RAM used/available, CPU load averages, SD capacity and service/process status. A bounded recording browser lists finalized MP4 files by day and supports authenticated downloads and optional browser playback. The stock `dgiot` application continues to own the camera and network configuration. There are no settings, PTZ, reboot, firmware-update or recording-deletion controls.
+
+The expanded interface, recording endpoints and direct ONVIF service passed the short live checks recorded below. The earlier status-only pilot’s measurements are retained separately as historical evidence. The additional discovery helper remains fixture-tested only and is not enabled on this unit.
 
 ### Prepare the private payload
 
@@ -118,13 +123,13 @@ Complete and verify an independent firmware backup first. Follow [Build the sepa
 
 Use the builder's `--password-file` option with a private host file containing one password line. The username defaults to `admin` and can be changed with `--username`. The builder produces `httpd.conf` with a salted MD5-crypt password hash; it does not store the plaintext password in the payload. Keep both the host password file and generated private payload out of the repository and public artifacts. The strict runtime configuration accepts one hashed account and rejects plaintext passwords or arbitrary HTTP/interpreter directives.
 
-The dashboard account is separate from the stock Telnet login and the Anyka web UI account. HTTP Basic authentication protects access to the pilot but does not encrypt network traffic. Use it only on the intended trusted LAN.
+The dashboard account is separate from the stock Telnet login, Anyka web UI account and optional ONVIF account. HTTP Basic authentication protects the interface and recording endpoints but does not encrypt network traffic. Use it only on the intended trusted LAN. ONVIF needs the independently provisioned credentials described below.
 
 ### Place it on the existing card
 
 Power the camera off and mount its existing camera-formatted FAT partition on the computer. Copy only the complete, privately provisioned **`LSCamoflash-fullhan/` folder** to the card root, preserving its name and contents. On the camera this must become **`/mnt/LSCamoflash-fullhan/`**, with `start.sh`, `stop.sh`, `common.sh`, `httpd.conf`, `bin/` and `www/` inside. Authentication stays outside the served `www/` directory.
 
-Use an absent destination; do not merge over another pilot directory or replace an existing service directory to get past a failed check. Preserve recordings, the diagnostic `product.cof` file and firmware backups. Do not run the Anyka installer, copy `HACK/`, or install its `hostapd` launcher and boot markers. The Fullhan pilot does not require repartitioning or formatting.
+Use an absent destination for a new installation. For a replacement, stop both owned services first, archive the prior payload privately, and preserve `httpd.conf`, `onvif.auth` and `onvif.uuid` as applicable before staging the complete new folder. Do not merge over a running directory or replace service state to get past a failed check. Preserve recordings, the diagnostic `product.cof` file and firmware backups. Do not run the Anyka installer, copy `HACK/`, or install its `hostapd` launcher and boot markers. The Fullhan pilot does not require repartitioning or formatting.
 
 Safely eject the card, insert it while the camera is off, and boot normally. The pilot has no SD autostart hook. Log into the existing stock diagnostic shell after each camera reboot to start it manually.
 
@@ -138,13 +143,17 @@ From the camera's root diagnostic shell, run:
 
 The launcher requires FH8626V100 hardware, the exact stock `dgiot` SHA-256 recorded above, a unique writable first FAT MMC partition mounted at `/mnt`, matching payload checksums and a valid hashed account. It also refuses a busy port 8080 or existing pilot state. Do not bypass these checks for a different camera or firmware.
 
-After a successful start, open **`http://<camera-ip>:8080/`** and use the username/password provisioned for this private payload. The stream links still select the stock video-only RTSP endpoints on port 8554; enabling the dashboard does not add microphone audio or RTSP authentication.
+After a successful start, open **`http://<camera-ip>:8080/`** and use the username/password provisioned for this private payload. Dashboard status refreshes every 15 seconds while the page is visible; CPU load is an average, not CPU usage percent. RAM used is total minus available, and both are displayed in MiB. The stream links still select the stock video-only RTSP endpoints on port 8554; enabling the interface does not add microphone audio or RTSP authentication.
+
+The **Recordings** tab loads metadata only when opened or refreshed. It browses the stock `DCIM/YYYY/MM/DD/` layout through ISO day selections and pages of at most 100 entries. Only nonempty finalized `<start-timestamp>-<end-timestamp>.mp4` files are exposed; temporary recordings and unrelated log/configuration files are excluded. The list reports when a safety scan limit makes the inventory incomplete.
+
+Use **Download** for an authenticated file transfer or **Play** to open the native browser player. No recording is fetched automatically on page load, and playback depends on the browser’s codec support. The recording endpoint implements GET, HEAD and a single byte Range for seeking/resume. Its complete HTTP path requires the isolated Fullhan BusyBox build: a live request showed that the shared BusyBox consumed the Range header before invoking CGI. Use the Fullhan-only patched binary from the build guide; its on-camera HTTP retest returned the requested 32 bytes with status 206 and a valid MP4 header. It provides no upload, delete or write operation; a busy recording being finalized may require refreshing the list.
 
 If startup fails, preserve the shell's error and any `LSCamoflash-fullhan/startup.log` on the card. That log contains bounded lifecycle messages, not request traces or credential contents. A generated page or successful build alone is not proof that the pilot has started on the camera.
 
-### Stop it
+### Stop the management interface
 
-From the same diagnostic shell, run:
+If optional ONVIF was started, stop it separately using the command below before replacing the payload or powering off. To stop HTTP and the recording endpoints, run from the same diagnostic shell:
 
 ```sh
 /mnt/LSCamoflash-fullhan/bin/busybox sh /mnt/LSCamoflash-fullhan/stop.sh
@@ -154,36 +163,85 @@ Stop only signals the HTTP process when its PID, start time, executable and comm
 
 Power the camera off before removing the card or archiving the pilot directory. Removing the pilot is not firmware restoration. Reboot clears its running service and RAM state; start it manually again after boot. Repeatable cold-boot persistence and normal-app acceptance remain user/device checks.
 
-### Live pilot validation
+### Optional ONVIF with manual client setup
+
+ONVIF is a separately built, opt-in service in the Fullhan package. It advertises the existing H.264 main/sub RTSP streams without transcoding them. Build it with [the Fullhan ONVIF options](building.md#build-the-separate-fullhan-pilot); a dashboard-only payload does not provide an ONVIF service. Ten focused ARM authentication/profile tests passed, including stale timestamp and replay rejection. Direct on-camera WSSE, HTTP Digest and standard-client checks also passed. The camera’s existing `dgiot` process owns UDP 3702, so this unit must use the new service without an additional discovery process.
+
+ONVIF credentials are mandatory for service startup and protected Device/Media operations, and are independent of the dashboard password. Its private `onvif.auth` contains exactly two lines: username, then plaintext password. The private `onvif.uuid` contains a UUIDv4 used as the discovery endpoint identity. Both are kept outside `www/`. Preserve both files across replacements so credentials and client registrations remain stable; do not publish them or move them into the recording/web directories.
+
+The only anonymous ONVIF operation is the read-only `GetSystemDateAndTime` query, which lets clients synchronize WSSE authentication timestamps with the camera’s clock. Device capabilities and media information still require WSSE UsernameToken or HTTP Digest authentication. Timestamp and replay checks remain enforced; this exception does not change the camera’s clock or settings.
+
+From the camera's root diagnostic shell, start this optional service separately:
+
+```sh
+/mnt/LSCamoflash-fullhan/bin/busybox sh /mnt/LSCamoflash-fullhan/onvif-start.sh --no-discovery
+```
+
+Use **`--no-discovery`** on this camera. Startup checks the exact firmware, payload, credentials, unique LAN address, free port 5000 and process state while leaving stock UDP 3702 untouched. It requires at least **8 MiB (`8192 kB`) of kernel-reported `MemAvailable`** before starting the ONVIF process. This is a startup guard, not a guarantee of sustained memory headroom or multiple-client stability. If it refuses to start, retain the error rather than lowering the threshold or bypassing ownership checks.
+
+| Service | Address / port | Authentication |
+| --- | --- | --- |
+| Management and recordings | `http://<camera-ip>:8080/` | Dashboard HTTP Basic account |
+| Optional ONVIF Device/Media | `http://<camera-ip>:5000/` | Independent WSSE / HTTP Digest account; only the read-only clock query is anonymous |
+| Stock WS-Discovery | UDP 3702, owned by `dgiot` | Observed XAddr `http://<camera-ip>:835/onvif/device_service`; authenticated native SOAP control path unverified |
+| Stock RTSP | TCP 8554, `/main` and `/sub` | No RTSP credentials requested in the stock video checks |
+
+After a successful start, the **Streams** tab reports the ONVIF service address and **Dashboard** reports its service state. Add **`http://<camera-ip>:5000/` manually** in the client using the independent ONVIF account. Stock discovery advertises the separate port-835 address above; that announcement does not identify or validate the new port-5000 service. The optional bounded Probe/Resolve helper passed fixtures but is not live-enabled on this unit because UDP 3702 is already occupied. Do not stop stock discovery to make room for it. The ONVIF service provides read-only Device/Media information and native H.264 stream profiles, not PTZ, audio, camera settings, reboot or firmware update.
+
+Stop the owned ONVIF service separately:
+
+```sh
+/mnt/LSCamoflash-fullhan/bin/busybox sh /mnt/LSCamoflash-fullhan/onvif-stop.sh
+```
+
+The stop path requires matching executable paths, process start times and complete arguments before signalling owned processes; `--no-discovery` mode owns no discovery process. It does not stop the stock application or RTSP service. HTTP and ONVIF have separate lifecycle state; stopping the dashboard does not itself stop ONVIF. Both services must be started manually again after a camera reboot: `start.sh`, then `onvif-start.sh --no-discovery` if the optional ONVIF service is used.
+
+### Expanded management and ONVIF live validation
+
+On **2026-10-14**, the expanded payload passed all **20 on-camera payload checksum entries** and checked file/directory flushes, with deployment exiting zero. The Fullhan-only patched BusyBox was used; the stock and Anyka binaries were not changed, and this deployment issued no flash writes.
+
+**Seventeen HTTP checks** passed, covering authentication, served management assets/status, finalized-recording lists, HEAD handling and a **32-byte HTTP 206 Range response** with the expected MP4 header. This exercised the complete HTTP-to-CGI path that failed with the shared BusyBox, rather than only calling the recording helper directly. Unauthorized and unsupported requests were rejected; private configuration and backup paths were excluded.
+
+**Fourteen on-camera SOAP checks** passed against the direct service on port 5000: HTTP Digest, WSSE UsernameToken, the anonymous clock-bootstrap query, capabilities and both native media profiles/stream URIs. Stale timestamps and replayed tokens were rejected, and unsupported mutations returned faults. An independent **python-onvif-zeep 0.2.12 / Zeep 4.3.3** client then used automatic camera-clock offset handling and completed five SOAP calls with HTTP 200: `GetSystemDateAndTime`, `GetCapabilities`, `GetProfiles`, and `GetStreamUri` for each profile. It found the main 1920×1080 and sub 640×360 H.264 profiles. The same standard-client calls passed again after the owned services were independently stopped and restarted.
+
+Both stock RTSP endpoints remained usable with HTTP and ONVIF running. Main H.264 at 1920×1080 and sub H.264 at 640×360 each reported 15 fps and decoded **45 frames over TCP**, with probe and decoder exit status zero and completed progress. Neither stream advertised audio. The streaming checks saved no footage.
+
+Duplicate starts were refused, and independent HTTP/ONVIF stop/restart checks preserved the stock application’s original PID and process start time. Stock UDP 3702 discovery remained in place; the new service ran with `--no-discovery`. Automatic discovery of the new service was not live-tested, and the stock port-835 SOAP path remains unverified.
+
+With both services running, sampled `MemAvailable` ranged from **12,940 to 13,468 KiB (about 12.6–13.2 MiB)** out of 31,320 KiB total. The HTTP daemon measured up to **640 KiB resident memory**, with a 640 KiB high-water mark; ONVIF measured **1,044 KiB resident memory**, with a **5,204 KiB high-water mark**. The stock application’s sampled resident memory ranged from 7,872 to 8,952 KiB. These varying request-time samples do not isolate each service’s marginal cost or guarantee sustained headroom. No matching OOM entry was found in the sampled kernel log.
+
+The complete host/ARM regression run finished with **440 tests passed, no skips, in 122.457 seconds**, including ARM1176/ARM926 paths and real HTTP Range/SOAP fixtures. These automated checks complement the separate live camera evidence above. Long-term and multiple-client operation, normal app/recording acceptance, internet-blocked operation, repeatable cold-boot startup, microphone audio, physical backup-card remount/readback and restoration remain unverified. Firmware-specific camera controls and automatic startup are not implemented.
+
+### Earlier status-only pilot validation
 
 On **2026-10-14**, the dedicated SD payload passed its on-camera checksums and checked file/directory flushes. Twelve HTTP checks verified mandatory login, authenticated HTML/JavaScript/status responses, read-only method handling, invalid-host rejection and exclusion of private configuration. A duplicate start was refused; owned shutdown closed port 8080, and manual restart succeeded. The original `dgiot` PID and process start time remained unchanged through the cycle.
 
 With the pilot running, both stock RTSP endpoints decoded 45 frames over TCP, each with exit status zero and completed progress. The dashboard daemon reported **648 KiB resident RAM**, with **13,456 KiB available out of 31,320 KiB total RAM** at the final sample. No OOM message was found in the sampled kernel log. These are short measurements under the tested workload, not a long-term resource or app-connectivity guarantee. No footage was retained.
 
-The complete local regression suite passed **356 tests**, including the 14 Fullhan fixtures and optional ARM checks; the separate credential-free and private builds also passed ARM1176 emulation. Proprietary firmware, diagnostic output and site credentials remain private. The user subsequently confirmed the dashboard works. Fresh physical SD-remount verification, restoration, stock-app acceptance, internet-blocked operation and cold-boot automatic startup have not been established.
+For that earlier status-only payload, the complete local regression suite passed **356 tests**, including the 14 Fullhan fixtures and optional ARM checks; its credential-free and private builds also passed ARM1176 emulation. These counts and live measurements predate the richer interface, recording browser and optional ONVIF candidate. Proprietary firmware, diagnostic output and site credentials remain private. The user subsequently confirmed the dashboard works. Fresh physical SD-remount verification, restoration, stock-app acceptance, internet-blocked operation and cold-boot automatic startup have not been established.
 
-## Path to the Anyka management interface
+## Shared interface and remaining capability gates
 
-The camera has a nominal 32 MB of RAM; the kernel exposes **31,320 KiB (30.6 MiB)**. A later live status sample reported **13,416 KiB (13.1 MiB) available**, leaving an estimated **17.5 MiB in use**. The dashboard's available counter is headroom for applications, including reclaimable memory; it is not memory already consumed by LSCamoflash. The pilot HTTP daemon previously measured 648 KiB resident RAM. These samples support further lightweight management work, but each resident service and transient media operation still needs its own measurement.
+The camera has a nominal 32 MB of RAM; the kernel exposes **31,320 KiB (30.6 MiB)**. The current HTTP/ONVIF samples above show about 12.6–13.2 MiB available during the bounded checks. Available memory includes reclaimable memory and is headroom for applications; it is not RAM already consumed by LSCamoflash. Peak usage and request-time variation matter, so additional resident services and media operations still require their own measurements.
 
-The existing Anyka interface can provide a shared appearance and navigation. Its static HTML, CSS and JavaScript live on the SD card and execute mainly in the user's browser. The current BusyBox HTTP and shell-CGI approach can serve a fuller interface without adding PHP or Python. The existing Anyka CGI handlers require adapters because they assume Anyka settings, session storage, recording paths, process names and media buffers.
+The richer interface now follows the project’s navbar, cards and tab navigation while using dependency-free browser code. Its static HTML, CSS and JavaScript live on the SD card and execute mainly in the user’s browser. BusyBox HTTP and dedicated CGI/helpers serve the interface without adding PHP or Python. Anyka-specific CGI handlers are not reused for camera control because their settings, session storage, paths and process assumptions differ.
 
-| Management area | Porting assessment |
+| Management area | Implementation and remaining gate |
 | --- | --- |
-| Status, network information, SD usage and RTSP links | Straightforward extensions of the working Fullhan status endpoint. |
-| Authentication, logs and recording downloads | Feasible with bounded, allowlisted paths and the camera's actual recording layout; keep backups and credentials private. |
-| ONVIF discovery and media profiles | Candidate for a separate service advertising the existing H.264 streams. Validate its libraries, authentication and memory on this exact platform before enabling it. Video transcoding is unnecessary for advertising those streams. |
+| Status, network information, CPU/SD/RAM and RTSP links | Implemented; authenticated management assets/status and stock-stream coexistence passed short live checks. |
+| Authentication and recordings | Mandatory dashboard authentication, bounded finalized-MP4 lists and HTTP HEAD/Range passed live checks. Private backup/configuration paths are not served; native browser playback varies by codec support. |
+| ONVIF media profiles and discovery | Direct port-5000 WSSE/Digest and standard-client profile/URI checks passed. The new discovery helper remains fixture-only on this unit; stock port-835 discovery is untouched and its SOAP path unverified. |
 | Image settings, night vision, motion, audio and camera restart | Need validated `dgiot` configuration, IPC or driver adapters. Function-name strings in the binary are investigation clues, not callable or tested APIs. |
 | Motor controls | Require applicable motor hardware and its verified Fullhan interface; Anyka process offsets do not apply. |
 | Automatic startup | Still unresolved on the stock SD boot path; the pilot currently requires a manual start after reboot. |
 
-A practical sequence is the shared interface and generic status pages, then recordings/downloads, then a measured ONVIF service, followed by firmware-specific camera controls. Keep optional services disabled until they have passed their individual tests. Audio and snapshots can require substantially more transient media processing than serving the management page. This is a porting assessment, not a claim that these additional controls are implemented.
+The richer interface, recording endpoints and direct ONVIF service now have bounded live evidence, including resource samples and stock-stream coexistence. Longer and multiple-client tests are still needed; the additional discovery helper remains disabled on this unit. Audio and snapshots can require substantially more transient media processing than serving the management page. Firmware-specific controls remain unimplemented until their individual adapters and device behavior have been validated.
 
 ## What a Fullhan port still needs
 
 This camera starts `dgiot` rather than the Anyka `anyka_ipc` application. The Anyka native `hostapd` hook, SD overlay assumptions and RTSP callback preload were developed for another startup path and binary ABI. They are not compatible Fullhan components.
 
-No automatic custom-script startup from the stock SD card has been established. Guino's non-flashing customization uses an external host to start tools after reboot; that is a separate design from a self-starting LSCamoflash runtime. The isolated dashboard is a first manual management pilot. A broader Fullhan port still needs a validated persistent startup method, its own camera-service and configuration integration, longer resource measurements, and repeatable reboot/app/streaming acceptance. Stock Telnet and RTSP working are useful investigation results, not full runtime support.
+No automatic custom-script startup from the stock SD card has been established. Guino's non-flashing customization uses an external host to start tools after reboot; that is a separate design from a self-starting LSCamoflash runtime. The isolated management interface and direct ONVIF service have passed the bounded checks above. A broader Fullhan port still needs a validated persistent startup method, its own camera-service and configuration integration, longer resource measurements, and repeatable reboot/app/streaming acceptance. Stock Telnet and RTSP working are useful investigation results, not full runtime support.
 
 ## Related primary references
 

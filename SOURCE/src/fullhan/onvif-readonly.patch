@@ -1,0 +1,386 @@
+--- a/src/ServiceContext.cpp
++++ b/src/ServiceContext.cpp
+@@ -263,8 +263,8 @@
+         sec_caps->X_x002e509Token      = soap_new_ptr(soap, false);
+         sec_caps->SAMLToken            = soap_new_ptr(soap, false);
+         sec_caps->KerberosToken        = soap_new_ptr(soap, false);
+-        sec_caps->UsernameToken        = soap_new_ptr(soap, false);
+-        sec_caps->HttpDigest           = soap_new_ptr(soap, false);
++        sec_caps->UsernameToken        = soap_new_ptr(soap, true);
++        sec_caps->HttpDigest           = soap_new_ptr(soap, true);
+         sec_caps->RELToken             = soap_new_ptr(soap, false);
+         sec_caps->MaxUsers             = soap_new_ptr(soap, 0);
+         sec_caps->MaxUserNameLength    = soap_new_ptr(soap, 0);
+@@ -298,7 +298,7 @@
+ {
+     auto prof_caps = soap_new_req_trt__ProfileCapabilities(soap);
+     if(prof_caps)
+-        prof_caps->MaximumNumberOfProfiles = soap_new_ptr(soap, 1);
++        prof_caps->MaximumNumberOfProfiles = soap_new_ptr(soap, 2);
+ 
+ 
+     auto str_caps = soap_new_req_trt__StreamingCapabilities(soap);
+--- a/src/ServiceDevice.cpp
++++ b/src/ServiceDevice.cpp
+@@ -11,6 +11,7 @@
+ 
+ #include "soapDeviceBindingService.h"
+ #include "ServiceContext.h"
++extern int fullhan_authorize(struct soap *);
+ #include "smacros.h"
+ #include "stools.h"
+ 
+@@ -22,6 +23,8 @@
+     _tds__GetServices         *tds__GetServices,
+     _tds__GetServicesResponse &tds__GetServicesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+     auto ctx   = (ServiceContext*)soap->user;
+@@ -72,7 +75,7 @@
+     tds__GetServicesResponse.Service.emplace_back(med_svc);
+ 
+ 
+-    if(ctx->get_ptz_node()->enable)
++    if(!ctx->get_ptz_node()->enable)
+         return SOAP_OK;
+ 
+     //PTZ Service
+@@ -106,6 +109,8 @@
+     _tds__GetServiceCapabilities         *tds__GetServiceCapabilities,
+     _tds__GetServiceCapabilitiesResponse &tds__GetServiceCapabilitiesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(tds__GetServiceCapabilities);
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+@@ -121,6 +126,8 @@
+     _tds__GetDeviceInformation         *tds__GetDeviceInformation,
+     _tds__GetDeviceInformationResponse &tds__GetDeviceInformationResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(tds__GetDeviceInformation);
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+@@ -141,6 +148,9 @@
+     _tds__GetSystemDateAndTime         *tds__GetSystemDateAndTime,
+     _tds__GetSystemDateAndTimeResponse &tds__GetSystemDateAndTimeResponse)
+ {
++    // ONVIF PRE_AUTH clock bootstrap lets clients compensate WSSE Created.
++    // This does not change the clock or relax token timestamp/nonce checks.
++
+     UNUSED(tds__GetSystemDateAndTime);
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+@@ -157,6 +167,8 @@
+     _tds__GetScopes         *tds__GetScopes,
+     _tds__GetScopesResponse &tds__GetScopesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(tds__GetScopes);
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+@@ -176,6 +188,8 @@
+     _tds__GetWsdlUrl         *tds__GetWsdlUrl,
+     _tds__GetWsdlUrlResponse &tds__GetWsdlUrlResponse)
+ {
++    return soap_sender_fault(soap,"ActionNotSupported",NULL);
++
+     UNUSED(tds__GetWsdlUrl);
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+@@ -190,6 +204,8 @@
+     _tds__GetUsers         *tds__GetUsers,
+     _tds__GetUsersResponse &tds__GetUsersResponse)
+ {
++    return soap_sender_fault(soap,"ActionNotSupported",NULL);
++
+     UNUSED(tds__GetUsers);
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+@@ -210,6 +226,8 @@
+     _tds__GetCapabilities         *tds__GetCapabilities,
+     _tds__GetCapabilitiesResponse &tds__GetCapabilitiesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+     auto ctx   = (ServiceContext*)soap->user;
+@@ -246,8 +264,7 @@
+ 
+         if( (category == tt__CapabilityCategory::All) || (category == tt__CapabilityCategory::Events) )
+         {
+-            tds__GetCapabilitiesResponse.Capabilities->Events = soap_new_req_tt__EventCapabilities(
+-                soap, XAddr, false, true, false);
++            tds__GetCapabilitiesResponse.Capabilities->Events = nullptr;
+         }
+     }
+ 
+@@ -262,6 +279,8 @@
+     _tds__GetNetworkInterfaces         *tds__GetNetworkInterfaces,
+     _tds__GetNetworkInterfacesResponse &tds__GetNetworkInterfacesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(tds__GetNetworkInterfaces);
+     DEBUG_MSG("Device: %s\n", __FUNCTION__);
+ 
+--- a/src/ServiceMedia.cpp
++++ b/src/ServiceMedia.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "soapMediaBindingService.h"
+ #include "ServiceContext.h"
++extern int fullhan_authorize(struct soap *);
+ #include "smacros.h"
+ #include "stools.h"
+ 
+@@ -20,6 +21,8 @@
+     _trt__GetServiceCapabilities         *trt__GetServiceCapabilities,
+     _trt__GetServiceCapabilitiesResponse &trt__GetServiceCapabilitiesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(trt__GetServiceCapabilities);
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+@@ -37,6 +40,8 @@
+     _trt__GetVideoSources         *trt__GetVideoSources,
+     _trt__GetVideoSourcesResponse &trt__GetVideoSourcesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(trt__GetVideoSources);
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+@@ -59,6 +64,8 @@
+     _trt__GetProfile         *trt__GetProfile,
+     _trt__GetProfileResponse &trt__GetProfileResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     DEBUG_MSG("Media: %s   get profile:%s\n", __FUNCTION__, trt__GetProfile->ProfileToken.c_str());
+ 
+     int ret       = SOAP_FAULT;
+@@ -83,6 +90,8 @@
+     _trt__GetProfiles         *trt__GetProfiles,
+     _trt__GetProfilesResponse &trt__GetProfilesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(trt__GetProfiles);
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+@@ -103,6 +112,8 @@
+     _trt__GetStreamUri         *trt__GetStreamUri,
+     _trt__GetStreamUriResponse &trt__GetStreamUriResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     DEBUG_MSG("Media: %s   for profile:%s\n", __FUNCTION__, trt__GetStreamUri->ProfileToken.c_str());
+ 
+     int  ret      = SOAP_FAULT;
+@@ -134,6 +145,8 @@
+     _trt__GetSnapshotUri         *trt__GetSnapshotUri,
+     _trt__GetSnapshotUriResponse &trt__GetSnapshotUriResponse)
+ {
++    return soap_sender_fault(soap,"ActionNotSupported",NULL);
++
+     DEBUG_MSG("Media: %s   for profile:%s\n", __FUNCTION__, trt__GetSnapshotUri->ProfileToken.c_str());
+ 
+     int ret       = SOAP_FAULT;
+@@ -165,6 +178,8 @@
+     _trt__GetVideoSourceConfigurations         *trt__GetVideoSourceConfigurations,
+     _trt__GetVideoSourceConfigurationsResponse &trt__GetVideoSourceConfigurationsResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(trt__GetVideoSourceConfigurations);
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+@@ -186,6 +201,8 @@
+     _trt__GetVideoEncoderConfigurations         *trt__GetVideoEncoderConfigurations,
+     _trt__GetVideoEncoderConfigurationsResponse &trt__GetVideoEncoderConfigurationsResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(trt__GetVideoEncoderConfigurations);
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+@@ -207,6 +224,8 @@
+     _trt__GetVideoSourceConfiguration         *trt__GetVideoSourceConfiguration,
+     _trt__GetVideoSourceConfigurationResponse &trt__GetVideoSourceConfigurationResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+     auto ctx      = (ServiceContext*)soap->user;
+@@ -232,6 +251,8 @@
+     _trt__GetVideoEncoderConfiguration         *trt__GetVideoEncoderConfiguration,
+     _trt__GetVideoEncoderConfigurationResponse &trt__GetVideoEncoderConfigurationResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+     auto ctx      = (ServiceContext*)soap->user;
+@@ -257,6 +278,8 @@
+     _trt__GetGuaranteedNumberOfVideoEncoderInstances         *trt__GetGuaranteedNumberOfVideoEncoderInstances,
+     _trt__GetGuaranteedNumberOfVideoEncoderInstancesResponse &trt__GetGuaranteedNumberOfVideoEncoderInstancesResponse)
+ {
++    if(fullhan_authorize(soap)!=SOAP_OK) return soap->error;
++
+     UNUSED(trt__GetGuaranteedNumberOfVideoEncoderInstances);
+     DEBUG_MSG("Media: %s\n", __FUNCTION__);
+ 
+--- a/src/onvif_srvd.cpp
++++ b/src/onvif_srvd.cpp
+@@ -4,6 +4,10 @@
+ #include <errno.h>
+ #include <string.h>
+ #include <getopt.h>
++#include <fcntl.h>
++#include <sys/stat.h>
++#include "wsseapi.h"
++#include "httpda.h"
+ 
+ 
+ #include "daemon.h"
+@@ -92,6 +96,7 @@
+         port,
+         user,
+         password,
++        auth_file,
+         manufacturer,
+         model,
+         firmware_ver,
+@@ -141,6 +146,7 @@
+     { "port",         required_argument, NULL, LongOpts::port          },
+     { "user",         required_argument, NULL, LongOpts::user          },
+     { "password",     required_argument, NULL, LongOpts::password      },
++    { "auth_file",    required_argument, NULL, LongOpts::auth_file     },
+     { "manufacturer", required_argument, NULL, LongOpts::manufacturer  },
+     { "model",        required_argument, NULL, LongOpts::model         },
+     { "firmware_ver", required_argument, NULL, LongOpts::firmware_ver  },
+@@ -177,7 +183,6 @@
+ #define FOREACH_SERVICE(APPLY, soap)                    \
+         APPLY(DeviceBindingService, soap)               \
+         APPLY(MediaBindingService, soap)                \
+-        APPLY(PTZBindingService, soap)                  \
+ 
+ 
+ /*
+@@ -217,6 +222,45 @@
+ static struct soap *soap;
+ 
+ ServiceContext service_ctx;
++static bool auth_loaded = false;
++static void load_auth(const char *path)
++{
++    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
++    struct stat st;
++    char data[164];
++    if(fd < 0 || fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 4 || st.st_size >= (off_t)sizeof(data))
++        daemon_error_exit("Invalid ONVIF credential file\n");
++    ssize_t count = read(fd, data, sizeof(data));
++    close(fd);
++    if(count != st.st_size) daemon_error_exit("Invalid ONVIF credential file\n");
++    std::string value(data, count);
++    size_t split = value.find('\n');
++    if(split < 1 || split > 32 || value.back() != '\n' || value.find('\n', split+1) != value.size()-1)
++        daemon_error_exit("Invalid ONVIF credential file\n");
++    for(size_t i=0;i<split;i++) if(!isalnum((unsigned char)value[i]) && value[i]!='_' && value[i]!='.' && value[i]!='-')
++        daemon_error_exit("Invalid ONVIF credential file\n");
++    size_t length=value.size()-split-2;
++    if(length < 1 || length > 128) daemon_error_exit("Invalid ONVIF credential file\n");
++    for(size_t i=split+1;i<value.size()-1;i++) if((unsigned char)value[i]<32 || (unsigned char)value[i]>126)
++        daemon_error_exit("Invalid ONVIF credential file\n");
++    service_ctx.user=value.substr(0,split);
++    service_ctx.password=value.substr(split+1,length);
++    auth_loaded=true;
++}
++int fullhan_authorize(struct soap *soap)
++{
++    const char *user=(soap->header && soap->header->wsse__Security) ? soap_wsse_get_Username(soap) : NULL;
++    if(soap->header && soap->header->wsse__Security) {
++        if(user && service_ctx.user==user && soap_wsse_verify_Password(soap,service_ctx.password.c_str())==SOAP_OK)
++            return SOAP_OK;
++        return soap_wsse_fault(soap,wsse__FailedAuthentication,"Authentication failed");
++    }
++    if(soap->userid && service_ctx.user==soap->userid && !soap->passwd &&
++       http_da_verify_post(soap,service_ctx.password.c_str())==SOAP_OK) return SOAP_OK;
++    soap->authrealm="LSCamoflash Fullhan";
++    return soap->error=401;
++}
++
+ 
+ 
+ 
+@@ -300,16 +344,19 @@
+ 
+ 
+             //ONVIF Service options (context)
++            case LongOpts::auth_file:
++                        load_auth(optarg);
++                        break;
+             case LongOpts::port:
+                         service_ctx.port = atoi(optarg);
+                         break;
+ 
+             case LongOpts::user:
+-                        service_ctx.user = optarg;
++                        daemon_error_exit("Use --auth_file for mandatory credentials\n");
+                         break;
+ 
+             case LongOpts::password:
+-                        service_ctx.password = optarg;
++                        daemon_error_exit("Use --auth_file for mandatory credentials\n");
+                         break;
+ 
+             case LongOpts::manufacturer:
+@@ -481,6 +528,9 @@
+         daemon_error_exit("Can't get mem for SOAP\n");
+ 
+ 
++    if(soap_register_plugin(soap,soap_wsse) || soap_register_plugin(soap,http_da))
++        daemon_error_exit("Authentication initialization failed\n");
++    soap->maxlength=65536;
+     soap->bind_flags = SO_REUSEADDR;
+ 
+     if( !soap_valid_socket(soap_bind(soap, NULL, service_ctx.port, 10)) )
+@@ -512,6 +562,7 @@
+ int main(int argc, char *argv[])
+ {
+     processing_cmd(argc, argv);
++    if(!auth_loaded) daemon_error_exit("ONVIF credentials are required\n");
+     daemonize2(init, nullptr);
+ 
+     FOREACH_SERVICE(DECLARE_SERVICE, soap)
+@@ -534,7 +585,8 @@
+         FOREACH_SERVICE(DISPATCH_SERVICE, soap)
+         else
+         {
+-            DEBUG_MSG("Unknown service\n");
++            soap_sender_fault(soap,"ActionNotSupported",NULL);
++            soap_send_fault(soap);
+         }
+ 
+         soap_destroy(soap); // delete managed C++ objects
+--- a/src/smacros.h
++++ b/src/smacros.h
+@@ -133,7 +133,7 @@
+         UNUSED(SOAP_REQ_ARG(_prefix, _handler));                            \
+         UNUSED(SOAP_RSP_ARG(_prefix, _handler));                            \
+         DEBUG_MSG(#_class ": %s\n", __FUNCTION__);                          \
+-        return SOAP_OK;                                                     \
++        return soap_sender_fault(soap,"ActionNotSupported",NULL);            \
+     }
+ 
+ 

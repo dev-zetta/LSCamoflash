@@ -42,11 +42,14 @@ class FullhanRuntimeTests(unittest.TestCase):
         self.card = self.fixture / 'card'
         self.card.mkdir()
         self.kit = self.card / 'LSCamoflash-fullhan'
-        shutil.copytree(SOURCE, self.kit)
+        shutil.copytree(SOURCE, self.kit, ignore=shutil.ignore_patterns('*.patch'))
         (self.kit / 'bin').mkdir()
         shutil.copyfile(shutil.which('busybox'), self.kit / 'bin/busybox')
         (self.kit / 'bin/busybox').chmod(0o755)
         self.bb = str(self.kit / 'bin/busybox')
+        for helper in ('fullhan-recordings','fullhan-discovery'):
+            (self.kit / 'bin' / helper).write_text('#!/bin/sh\nexit 1\n')
+            (self.kit / 'bin' / helper).chmod(0o755)
         self.state = self.fixture / 'state'
         self.device = self.fixture / 'mmcblk0p1'
         self.device.touch()
@@ -66,6 +69,8 @@ class FullhanRuntimeTests(unittest.TestCase):
         self.memory.write_text('MemTotal: 65536 kB\nMemFree: 4096 kB\nMemAvailable: 20000 kB\nCached: 10000 kB\nPrivatePassword: DO-NOT-LEAK\n')
         self.uptime = self.fixture / 'uptime'
         self.uptime.write_text('123.75 99.00\n')
+        self.loadavg = self.fixture / 'loadavg'
+        self.loadavg.write_text('1.25 0.50 0.10 1/10 123\n')
         self.ip = self.fixture / 'ip-addresses'
         self.ip.write_text('2: wlan0: <UP>\n    inet 192.0.2.44/24 scope global wlan0\n')
         try:
@@ -84,6 +89,7 @@ class FullhanRuntimeTests(unittest.TestCase):
                     'MOUNTS="/proc/mounts"': f'MOUNTS="{self.mounts}"',
                     'MEMINFO="/proc/meminfo"': f'MEMINFO="{self.memory}"',
                     'UPTIME="/proc/uptime"': f'UPTIME="{self.uptime}"',
+                    'LOADAVG="/proc/loadavg"': f'LOADAVG="{self.loadavg}"',
                     'STOCK="/usr/bin/dgiot"': f'STOCK="{self.stock}"',
                     BUILD.REPO.joinpath('SOURCE/src/fullhan/common.sh').read_text().split('STOCK_SHA="')[1].split('"')[0]: hashlib.sha256(self.stock.read_bytes()).hexdigest(),
                     'PORT="8080"': f'PORT="{self.port}"',
@@ -112,7 +118,7 @@ class FullhanRuntimeTests(unittest.TestCase):
         return f'{source or self.device} {self.card} {kind} {options},relatime 0 0\n'
 
     def checksums(self):
-        names = (*BUILD.FILES, 'bin/busybox', 'LICENSE.MIT', 'COPYING.BusyBox', 'manifest.json')
+        names = (*BUILD.FILES, 'bin/busybox', 'bin/fullhan-recordings', 'bin/fullhan-discovery', 'LICENSE.MIT', 'COPYING.BusyBox', 'manifest.json')
         (self.kit / 'SHA256SUMS').write_text(''.join(
             hashlib.sha256((self.kit / name).read_bytes()).hexdigest() + '  ' + name + '\n' for name in names))
 
@@ -308,6 +314,10 @@ class FullhanRuntimeTests(unittest.TestCase):
         self.assertEqual(data['ip'], '192.0.2.44')
         self.assertEqual(data['uptime_seconds'], 123)
         self.assertEqual(data['memory']['available_kB'], 20000)
+        self.assertEqual(data['memory']['used_kB'], 45536)
+        self.assertEqual(data['cpu'], {'load_1m':1.25,'load_5m':0.5,'load_15m':0.1})
+        self.assertFalse(data['onvif']['available'])
+        self.assertFalse(data['services']['onvif'])
         self.assertNotIn('attacker.example', result.stdout)
         self.assertNotIn('PRIVATE-ID', result.stdout)
         self.assertNotIn('DO-NOT-LEAK', result.stdout)
@@ -356,15 +366,24 @@ class FullhanBuilderTests(unittest.TestCase):
         header = b'\x7fELF\x01\x01\x01' + b'\0' * 9
         header += struct.pack('<HHIIIIIHHHHHH', 2, 40, 1, 0x10000, 52, 0, 0x5000200, 52, 32, 1, 0, 0, 0)
         self.busybox.write_bytes(header + struct.pack('<IIIIIIII', 1, 0, 0x10000, 0x10000, 84, 84, 5, 4096))
+        self.busybox_manifest = self.root / 'busybox-manifest.json'
+        self.busybox_manifest.write_text(json.dumps({'format':'lscamoflash-fullhan-busybox-v1','sha256':hashlib.sha256(self.busybox.read_bytes()).hexdigest(),'cgi_range_header':True}))
         self.readelf = self.root / 'readelf'
         self.readelf.write_text('#!/bin/sh\necho "Tag_CPU_arch: v5TE"\n')
         self.readelf.chmod(0o755)
         self.output = self.root / 'output/LSCamoflash-fullhan'
+        self.compiler = self.root / 'cc'
+        self.compiler.write_text('#!/bin/sh\nwhile [ \"$1\" != -o ]; do shift; done\nshift\ncp ' + str(self.busybox) + ' \"$1\"\n')
+        self.compiler.chmod(0o755)
+        for helper in ('fullhan-recordings/fullhan_recordings.c','fullhan-discovery/discovery.c'):
+            destination = self.root / 'SOURCE/src/contrib' / helper
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text('/* fixture compile input */\n')
 
     def args(self, password=None):
         from types import SimpleNamespace
         return SimpleNamespace(output=self.output, busybox=self.busybox, readelf=str(self.readelf), qemu=None,
-                               username='admin', password_file=password)
+                               username='admin', password_file=password, cc=str(self.compiler), busybox_manifest=self.busybox_manifest, onvif_kit=None, onvif_password_file=None)
 
     def test_builder_curates_payload_checksums_and_has_no_default_credentials(self):
         BUILD.build(self.args(), self.root)
@@ -394,8 +413,51 @@ class FullhanBuilderTests(unittest.TestCase):
             if path.is_file():
                 self.assertNotIn(b'host-only-fixture-secret', path.read_bytes())
 
+    def test_unpatched_or_mismatched_busybox_provenance_is_rejected(self):
+        for field,value in (('cgi_range_header',False),('sha256','0'*64)):
+            provenance=json.loads(self.busybox_manifest.read_text());provenance[field]=value
+            self.busybox_manifest.write_text(json.dumps(provenance))
+            with self.assertRaisesRegex(ValueError,'CGI Range header patch'):
+                BUILD.build(self.args(),self.root)
+            self.assertFalse(self.output.exists())
+            self.busybox_manifest.write_text(json.dumps({'format':'lscamoflash-fullhan-busybox-v1','sha256':hashlib.sha256(self.busybox.read_bytes()).hexdigest(),'cgi_range_header':True}))
+
+    def onvif_fixture(self):
+        kit = self.root / 'onvif'
+        (kit / 'bin').mkdir(parents=True)
+        shutil.copyfile(self.busybox, kit / 'bin/onvif_srvd')
+        (kit / 'COPYING.ONVIF').write_text('Public source license fixture\n')
+        (kit / 'manifest.json').write_text(json.dumps({'format':'lscamoflash-fullhan-onvif-v1','sha256':hashlib.sha256(self.busybox.read_bytes()).hexdigest()}))
+        return kit
+
+    def test_optional_onvif_has_no_public_secret_and_preserves_binary_provenance(self):
+        args = self.args()
+        args.onvif_kit = self.onvif_fixture()
+        BUILD.build(args, self.root)
+        self.assertTrue((self.output / 'bin/onvif_srvd').exists())
+        self.assertFalse((self.output / 'onvif.auth').exists())
+        self.assertFalse((self.output / 'onvif.uuid').exists())
+        manifest = json.loads((self.output / 'manifest.json').read_text())
+        self.assertTrue(manifest['onvif_included'])
+        self.assertFalse(manifest['onvif_credentials_provisioned'])
+        self.assertEqual(manifest['onvif_provenance']['sha256'],hashlib.sha256(self.busybox.read_bytes()).hexdigest())
+
+    def test_independent_onvif_credentials_remain_outside_web_and_public_checksums(self):
+        password = self.root / 'onvif-password'
+        password.write_text('private-onvif-fixture\n')
+        args = self.args(); args.onvif_kit = self.onvif_fixture(); args.onvif_password_file = password
+        BUILD.build(args, self.root)
+        self.assertEqual((self.output / 'onvif.auth').read_text(),'admin\nprivate-onvif-fixture\n')
+        import uuid
+        self.assertEqual(uuid.UUID((self.output / 'onvif.uuid').read_text().strip()).version,4)
+        for file in (self.output / 'www').rglob('*'):
+            if file.is_file():self.assertNotIn(b'private-onvif-fixture',file.read_bytes())
+        self.assertNotIn('onvif.auth',(self.output / 'SHA256SUMS').read_text())
+        self.assertNotIn('private-onvif-fixture',(self.output / 'manifest.json').read_text())
+
     def test_host_or_dynamic_elf_and_renamed_or_symlink_output_are_rejected(self):
         self.busybox.write_bytes(b'not ARM ELF\n')
+        self.busybox_manifest.write_text(json.dumps({'format':'lscamoflash-fullhan-busybox-v1','sha256':hashlib.sha256(self.busybox.read_bytes()).hexdigest(),'cgi_range_header':True}))
         with self.assertRaisesRegex(ValueError, 'ELF'):
             BUILD.build(self.args(), self.root)
         self.assertFalse(self.output.exists())

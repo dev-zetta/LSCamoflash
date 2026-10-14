@@ -7,6 +7,7 @@ CPUINFO="/proc/cpuinfo"
 MOUNTS="/proc/mounts"
 MEMINFO="/proc/meminfo"
 UPTIME="/proc/uptime"
+LOADAVG="/proc/loadavg"
 PROC="/proc"
 STOCK="/usr/bin/dgiot"
 STOCK_SHA="ef9545b2f4fce419d71dadf7723a9cb010500c994a87a325a8c325b51648c8b2"
@@ -60,7 +61,7 @@ verify_payload() {
             case "$relative" in bin|www|www/cgi-bin) ;; *) return 1;; esac
         else
             regular "$path" || return 1
-            case "$relative" in start.sh|stop.sh|common.sh|bin/busybox|www/index.html|www/dashboard.js|www/cgi-bin/status.cgi|manifest.json|SHA256SUMS|README.md|LICENSE.MIT|COPYING.BusyBox|httpd.conf|startup.log) ;; *) return 1;; esac
+            case "$relative" in start.sh|stop.sh|common.sh|bin/busybox|bin/fullhan-recordings|bin/onvif_srvd|bin/fullhan-discovery|www/index.html|www/dashboard.js|www/dashboard.css|www/cgi-bin/status.cgi|www/cgi-bin/recordings.cgi|manifest.json|SHA256SUMS|README.md|LICENSE.MIT|COPYING.BusyBox|COPYING.ONVIF|httpd.conf|startup.log|onvif-start.sh|onvif-stop.sh|onvif-common.sh|onvif.auth|onvif.uuid) ;; *) return 1;; esac
         fi
     done
     (cd "$ROOT" && "$BB" sha256sum -c SHA256SUMS >/dev/null 2>&1)

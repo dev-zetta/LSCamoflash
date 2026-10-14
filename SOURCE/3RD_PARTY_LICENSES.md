@@ -14,7 +14,7 @@ The project license applies to project-authored code. Third-party components kee
 
 `SOURCE/src/bin/prepare-release.py --output release` stages the versioned full and update archives, a separate backup-kit archive, LICENSE.MIT, COPYING.BusyBox, THIRD_PARTY_NOTICES.md, SHA256SUMS and a public source bundle. The source bundle contains Git-tracked public files, including build scripts, configurations and patches, plus all hydrated archives and other inputs declared in SOURCE/Makefile URLS. Private research, untracked extracted files and undeclared downloads are excluded. Each upstream source archive retains its license texts.
 
-The separate experimental Fullhan pilot contains project-authored scripts and a static BusyBox, with LICENSE.MIT and COPYING.BusyBox included in its own output. Its BusyBox source, configuration and patches use the same declared inputs as the default build. Site-owned authentication and proprietary Fullhan firmware are excluded from public packages.
+The separate experimental Fullhan management package contains project-authored scripts and static helpers plus a static BusyBox, with LICENSE.MIT and COPYING.BusyBox included in its own output. Optional static ONVIF additionally bundles modified onvif_srvd, its bundled gSOAP SDK, OpenSSL, zlib and toolchain runtimes; COPYING.ONVIF retains their notices and the gSOAP OpenSSL exception, while the build manifest records consumed inputs and the private-build source patch. Its BusyBox source, configuration and patches use the same declared inputs as the default build. Site-owned authentication and proprietary Fullhan firmware are excluded from public packages.
 
 ## Toolchains
 

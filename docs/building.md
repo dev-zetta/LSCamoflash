@@ -16,10 +16,10 @@ sudo apt-get install -y \
   git git-lfs ca-certificates curl unzip tar gzip bzip2 xz-utils \
   build-essential binutils make cmake flex bison gsoap \
   automake autoconf autoconf-archive pkg-config perl patch \
-  python3 busybox fdisk qemu-user
+  python3 busybox fdisk qemu-user openssl nodejs
 ```
 
-The compiler and GNU build tools compile the bundled projects. The host `gsoap` package supplies the SOAP code generators used by ONVIF; the build also cross-compiles the camera's gSOAP library. `curl` and the archive utilities fetch and unpack source inputs. `busybox` and `fdisk` support host regression fixtures, while `qemu-user` provides `qemu-arm` for running ARM userspace checks without hardware.
+The compiler and GNU build tools compile the bundled projects. The host `gsoap` package supplies the SOAP code generators used by ONVIF; the build also cross-compiles the camera's gSOAP library. `curl` and the archive utilities fetch and unpack source inputs. `busybox` and `fdisk` support host regression fixtures, while `qemu-user` provides `qemu-arm` for running ARM userspace checks without hardware. Host OpenSSL hashes private dashboard credentials, and Node.js runs the browser behavior fixtures without npm packages.
 
 The [Build-Test workflow](../.github/workflows/makefile.yml) is the reference for the current CI environment and build steps. It runs on GitHub's Ubuntu image, where some common utilities are already installed; the command above lists those utilities explicitly for a fresh host.
 
@@ -59,22 +59,40 @@ Use the [firmware backup guide](firmware-backup.md) for the kit's staging proced
 
 ## Build the separate Fullhan pilot
 
-The [SZ B22705 / firmware 7.6.23 pilot](camera-sz-b22705.md) is a small, manually started status dashboard for the stock Fullhan application. It has its own package and does not use the Anyka runtime, installer or SD bootstrap. Build a credential-free payload with an ARM1176 emulation check:
+The [SZ B22705 / firmware 7.6.23 pilot](camera-sz-b22705.md) has a manually started management interface, bounded read-only recording downloads and an optional isolated ONVIF service. It has its own package and does not use the Anyka runtime, installer or SD bootstrap. The richer interface and optional services require their own device acceptance; an earlier status-only pilot passed short live checks.
+
+To build the static ONVIF candidate and include it in a credential-free Fullhan payload, run from the repository root:
 
 ```sh
-QEMU_ARM=/usr/bin/qemu-arm make -C SOURCE fullhan-kit
+QEMU_ARM=/usr/bin/qemu-arm make -C SOURCE fullhan-busybox-kit fullhan-onvif-kit fullhan-kit \
+  FULLHAN_ONVIF_KIT="$PWD/SOURCE/fullhan-onvif"
 ```
 
-The output is `SOURCE/fullhan-kit/LSCamoflash-fullhan/`. The builder refuses a nonempty destination, so preserve any site-owned authentication before preparing a replacement output. The default payload cannot start until credentials are provisioned. To build a separate private copy, create a private file containing one password line and run:
+The separate BusyBox build produces `SOURCE/fullhan-busybox/bin/busybox` with the Fullhan HTTP Range-to-CGI patch. A live request found that the shared BusyBox 1.36.1 consumed the Range header before invoking CGI; this isolated build forwards it for recording seeking/resume without changing the stock or Anyka binaries. The ONVIF build produces `SOURCE/fullhan-onvif/`, including the static server, provenance manifest and `COPYING.ONVIF`. The assembled management payload is `SOURCE/fullhan-kit/LSCamoflash-fullhan/`, including the recording helper, web assets and optional ONVIF launchers. The ONVIF and assembled-payload builders require an absent or empty destination and refuse to overwrite existing files. Preserve earlier outputs and site credentials before preparing a replacement; do not rerun the command over a nonempty build directory.
+
+For the dashboard and recording browser without the optional ONVIF service, choose `QEMU_ARM=/usr/bin/qemu-arm make -C SOURCE fullhan-busybox-kit fullhan-kit` instead. The default payload cannot start until dashboard credentials are provisioned. The ONVIF service separately requires its own private credentials and endpoint UUID.
+
+Create two separate private host files, each containing one password line, then build a private copy in a new output directory:
 
 ```sh
 python3 tools/fullhan/build-kit.py \
   --qemu /usr/bin/qemu-arm \
-  --password-file /absolute/private/path/password.txt \
+  --busybox SOURCE/fullhan-busybox/bin/busybox \
+  --onvif-kit SOURCE/fullhan-onvif \
+  --password-file /absolute/private/path/dashboard-password.txt \
+  --onvif-password-file /absolute/private/path/onvif-password.txt \
   --output /absolute/private/path/LSCamoflash-fullhan
 ```
 
-Host OpenSSL is required for `--password-file`; the username defaults to `admin` and can be changed with `--username`. The plaintext password is passed to OpenSSL through stdin. The resulting `httpd.conf` contains a salted password hash and must stay private. The builder checks the static ARM ELF, includes license notices and records payload checksums; `--qemu` also verifies the required BusyBox applets under ARM1176. Neither command installs files on a camera. Follow the camera guide for SD placement, manual startup and acceptance limits. CI builds this credential-free pilot as its own experimental artifact; it is separate from the eight stable release assets.
+Omit both `--onvif-kit` and `--onvif-password-file` for a dashboard-only copy. The username defaults to `admin` for both provisioned accounts and can be changed with `--username`; use independent passwords. Host OpenSSL receives the dashboard password through stdin and writes only its salted MD5-crypt hash to `httpd.conf`. The ONVIF password must be one printable ASCII line of 1–128 bytes. ONVIF uses a separate two-line `onvif.auth` containing its username and plaintext password for WSSE UsernameToken / HTTP Digest authentication, plus a private UUIDv4 in `onvif.uuid` identifying the endpoint.
+
+Independent ONVIF credentials remain mandatory for service startup. The only anonymous ONVIF operation is the read-only `GetSystemDateAndTime` query, which lets clients synchronize WSSE authentication timestamps with the camera’s clock. Device capabilities and media information still require WSSE UsernameToken or HTTP Digest authentication. Timestamp and replay checks remain enforced; this exception does not change the camera’s clock or settings.
+
+`httpd.conf`, `onvif.auth` and `onvif.uuid` stay outside the served `www/` directory and are excluded from the public payload checksum list. Keep these site-owned files and all private output copies out of the repository and published artifacts. Preserve the existing ONVIF credentials and UUID when replacing a stopped installation so clients retain the same endpoint identity; the builder generates a fresh UUID for a newly provisioned copy.
+
+The builder checks static ARM ELF attributes, includes license notices and records public payload checksums. `--qemu` also verifies BusyBox applets, HTTP authentication support and helper invalid-input behavior under ARM1176. The optional ONVIF build records its source inputs and patch provenance. Neither builder installs files on a camera. CI is configured to publish a separate credential-free experimental Fullhan artifact; it is separate from the eight stable release assets.
+
+Follow the [camera guide](camera-sz-b22705.md#experimental-fullhan-management-interface) for placement, mandatory authentication, separate manual HTTP/ONVIF start and stop commands, and acceptance limits. Each camera reboot still requires `start.sh` and, if ONVIF is used, `onvif-start.sh --no-discovery` to be started manually. This unit’s stock application owns UDP 3702; the new authenticated service uses manual client setup at port 5000 and leaves stock discovery untouched.
 
 ## Verify the generated runtime
 

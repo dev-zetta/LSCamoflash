@@ -1,3 +1,73 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LSCamoflash Fullhan pilot</title><style>body{font:16px system-ui,sans-serif;max-width:48em;margin:3em auto;padding:0 1em;background:#17212b;color:#eee}a{color:#83c7ff}dt{font-weight:bold;margin-top:1em}dd{margin:.3em 0}code{overflow-wrap:anywhere}#error{color:#ffb5b5}</style><script src="dashboard.js" defer></script></head>
-<body><h1>Fullhan read-only management</h1><p>The stock camera application and its settings remain in control.</p><p id="error" role="status"></p><dl><dt>Camera</dt><dd id="model">Loading…</dd><dt>Firmware</dt><dd id="firmware"></dd><dt>Local address</dt><dd id="ip"></dd><dt>Uptime</dt><dd id="uptime"></dd><dt>RAM available</dt><dd id="memory"></dd><dt>Main stream · 1920×1080 H264</dt><dd><a id="main">Loading…</a></dd><dt>Substream · 640×360 H264</dt><dd><a id="sub">Loading…</a></dd></dl><p>Verified streams provide video. Microphone audio has not been validated.</p><p>This pilot offers no camera settings, PTZ, reboot, firmware update or recording deletion.</p></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>LSCamoflash · Fullhan camera</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <script src="dashboard.js" defer></script>
+</head>
+<body>
+  <header class="navbar">
+    <div class="container navbar-inner">
+      <a class="brand" href="./">LSCamoflash <span>Fullhan</span></a>
+      <span class="pilot-badge">Experimental</span>
+    </div>
+  </header>
+  <main class="container">
+    <div class="page-heading">
+      <div><p class="eyebrow">Camera overview</p><h1 id="model">LSC Indoor Camera</h1><p class="muted"><span id="firmware">Connecting…</span> <span aria-hidden="true">·</span> <span id="ip">—</span></p></div>
+      <div class="heading-actions"><span id="connection" class="status-badge">Connecting</span><button id="refresh-status" class="button button-secondary" type="button">Refresh status</button></div>
+    </div>
+    <p id="error" class="notice notice-error" role="alert" hidden></p>
+    <nav class="tabs" role="tablist" aria-label="Camera pages">
+      <button id="tab-dashboard" class="tab active" type="button" role="tab" data-tab="dashboard" aria-controls="panel-dashboard" aria-selected="true">Dashboard</button>
+      <button id="tab-recordings" class="tab" type="button" role="tab" data-tab="recordings" aria-controls="panel-recordings" aria-selected="false" tabindex="-1">Recordings</button>
+      <button id="tab-streams" class="tab" type="button" role="tab" data-tab="streams" aria-controls="panel-streams" aria-selected="false" tabindex="-1">Streams</button>
+      <button id="tab-diagnostics" class="tab" type="button" role="tab" data-tab="diagnostics" aria-controls="panel-diagnostics" aria-selected="false" tabindex="-1">Diagnostics</button>
+    </nav>
+
+    <section id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
+      <div class="metric-grid">
+        <article class="card metric"><h2>RAM used</h2><p id="ram-used" class="metric-value">—</p><progress id="ram-meter" max="100" value="0" aria-label="RAM used" hidden></progress><p id="memory" class="muted">Available RAM: —</p><p id="ram-note" class="small muted">Uses the kernel's available-memory estimate.</p></article>
+        <article class="card metric"><h2>SD card used</h2><p id="storage-used" class="metric-value">—</p><progress id="storage-meter" max="100" value="0" aria-label="SD card used" hidden></progress><p id="storage-available" class="muted">Available space: —</p><p id="storage-note" class="small muted">Recording storage</p></article>
+        <article class="card metric"><h2>CPU load</h2><p id="cpu-load" class="metric-value">—</p><p class="muted">1-minute average</p><p class="small muted">Load average is not CPU usage percent.</p></article>
+        <article class="card metric"><h2>Uptime</h2><p id="uptime" class="metric-value metric-duration">—</p><p class="muted">Since the camera last started</p><p id="last-updated" class="small muted">Waiting for status</p></article>
+      </div>
+      <article class="card"><div class="card-heading"><h2>Services</h2><span class="subtle-badge">Stock camera mode</span></div><dl class="service-grid"><div><dt>Camera application</dt><dd id="service-stock">Not reported</dd></div><div><dt>Stock RTSP</dt><dd id="service-rtsp">Not reported</dd></div><div><dt>ONVIF</dt><dd id="service-onvif">Not reported</dd></div></dl></article>
+      <article class="card"><h2>Camera settings</h2><p class="muted">Settings, motor control, reboot and firmware updates are not available in this Fullhan dashboard. Use the stock camera application for supported camera settings.</p></article>
+    </section>
+
+    <section id="panel-recordings" role="tabpanel" aria-labelledby="tab-recordings" hidden>
+      <article class="card">
+        <div class="card-heading"><div><h2>SD recordings</h2><p class="muted">Browse finalized MP4 recordings by day. Times follow the camera clock; recordings are not changed.</p></div><button id="refresh-recordings" class="button button-secondary" type="button">Refresh list</button></div>
+        <form id="recording-filter" class="filter-bar"><label for="recording-day">Day</label><input id="recording-day" name="day" type="date" required><button class="button" type="submit">Open day</button></form>
+        <div class="recording-navigation"><button id="all-days" class="text-button" type="button">All days</button><span aria-hidden="true">/</span><span id="recording-location">All days</span></div>
+        <p id="recording-error" class="notice notice-error" role="alert" hidden></p>
+        <p id="recording-warning" class="notice" hidden></p>
+        <p id="recording-summary" class="muted" aria-live="polite">Open this page to load recordings.</p>
+        <div class="table-scroll"><table><thead><tr><th scope="col">Name</th><th scope="col">Size</th><th scope="col" class="actions-column">Actions</th></tr></thead><tbody id="recording-rows"></tbody></table></div>
+        <div class="pagination"><button id="recordings-previous" class="button button-secondary" type="button" disabled>Previous</button><span id="recording-page" class="muted">Up to 100 entries per page</span><button id="recordings-next" class="button button-secondary" type="button" disabled>Next</button></div>
+      </article>
+      <article id="player-card" class="card" hidden><div class="card-heading"><h2 id="player-title">Recording</h2><button id="close-player" class="button button-secondary" type="button">Close player</button></div><video id="recording-player" controls preload="none"></video><p class="small muted">Playback starts only when requested. Browser codec support varies; download the file to use another player.</p></article>
+    </section>
+
+    <section id="panel-streams" role="tabpanel" aria-labelledby="tab-streams" hidden>
+      <div class="two-column">
+        <article class="card"><span class="subtle-badge">Main stream</span><h2>1080p video</h2><p class="muted">H.264 · 1920 × 1080 · 15 fps</p><a id="main" class="stream-url">Waiting for camera status</a><p class="small muted">Open this address in an RTSP-capable player.</p></article>
+        <article class="card"><span class="subtle-badge">Substream</span><h2>Lower bandwidth</h2><p class="muted">H.264 · 640 × 360 · 15 fps</p><a id="sub" class="stream-url">Waiting for camera status</a><p class="small muted">Use this stream when a smaller video is sufficient.</p></article>
+      </div>
+      <article class="card"><h2>ONVIF connection</h2><p id="onvif-note" class="muted">Waiting for service status.</p><a id="onvif-url" class="stream-url" hidden></a><p class="small muted">Add the service address manually in your client. The dashboard password protects this web interface; ONVIF authentication is separate.</p></article>
+      <p class="notice">The tested stock RTSP streams provide video without RTSP credentials. Neither advertised microphone audio. Keep camera services on a trusted local network.</p>
+    </section>
+
+    <section id="panel-diagnostics" role="tabpanel" aria-labelledby="tab-diagnostics" hidden>
+      <article class="card"><h2>System details</h2><dl class="detail-grid"><dt>Backend</dt><dd id="backend">—</dd><dt>CPU load · 1 / 5 / 15 minutes</dt><dd id="cpu-loads">—</dd><dt>Dashboard resident memory</dt><dd id="management-rss">Not reported</dd><dt>Camera application resident memory</dt><dd id="stock-rss">Not reported</dd><dt>RAM total</dt><dd id="ram-total">—</dd><dt>RAM available</dt><dd id="ram-available">—</dd></dl><p class="small muted">Process resident memory is part of system memory, not an additional allocation to add to it.</p></article>
+      <article class="card"><h2>About this dashboard</h2><p class="muted">The Fullhan dashboard starts manually from the SD card and leaves the stock camera application in control. Status refreshes every 15 seconds while the page is visible. Recording lists refresh only when you request them.</p><p class="muted">If a service is unavailable, check the manual startup output and the pilot's bounded startup log. This interface cannot reset the camera, modify its network or install firmware.</p></article>
+    </section>
+    <footer>LSCamoflash · Fullhan experimental dashboard <span>Authenticated access · Trusted LAN</span></footer>
+  </main>
+  <noscript><p class="container notice">Enable JavaScript to view camera status and browse recordings.</p></noscript>
+</body>
+</html>

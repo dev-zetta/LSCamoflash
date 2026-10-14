@@ -4,8 +4,9 @@
 
 ### Features
 
-- Add a separate experimental Fullhan FH8626V100 / SZ B22705 firmware 7.6.23 status dashboard with mandatory authentication, available RAM reporting and stock RTSP links. Its SD-only package has exact firmware guards, manual startup and owned-process shutdown; it keeps the stock application running. Camera controls, audio, ONVIF and automatic startup are outside this pilot.
-- Build and upload the credential-free Fullhan pilot separately in CI, including an ARM1176 compatibility check. Private site authentication is never included in the public payload.
+- Add a separate experimental Fullhan FH8626V100 / SZ B22705 firmware 7.6.23 management interface with mandatory authentication, CPU/SD/RAM/service diagnostics, finalized MP4 recording lists and range-aware downloads, and stock RTSP links. Its SD-only package has exact firmware guards, manual startup and owned-process shutdown; it keeps the stock application running. Camera settings, audio and automatic startup remain outside this port.
+- Add an optional static Fullhan ONVIF Device/Media server with WSSE UsernameToken or HTTP Digest authentication, anonymous clock bootstrap for timestamp synchronization, native main/sub H.264 profiles, bounded discovery and guarded independent startup/shutdown. Unsupported camera mutations, PTZ and snapshots return faults.
+- Build and upload the credential-free Fullhan management package separately in CI, including ARM1176 compatibility and SOAP checks. Private site authentication is never included in the public payload.
 
 ### Fixes
 
