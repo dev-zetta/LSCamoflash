@@ -25,6 +25,8 @@ For this camera, local streaming mode replaces Tuya app operation and needs expl
 
 Other Anyka camera profiles are inherited from upstream, including IPC-XC-C323 support. Their evidence and remaining checks are listed in the [compatibility and integration notes](docs/integration.md). A matching product name alone does not establish compatibility.
 
+The [Fullhan SZ B22705 / firmware 7.6.23 guide](docs/camera-sz-b22705.md) documents verified stock RTSP, diagnostic access and firmware backup. This platform needs its own runtime; the Anyka package above must not be installed on it.
+
 ## Get started
 
 1. **Check your camera and firmware.** Read the [compatibility notes](docs/integration.md) and any guide for your model.

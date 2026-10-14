@@ -32,6 +32,8 @@ Der lokale RTSP-Modus ersetzt bei diesem Profil den normalen Tuya-Betrieb und be
 
 Weitere Profile und den Stand früherer Fehlerberichte beschreibt die [Kompatibilitätsübersicht](docs/integration.md).
 
+Der [Leitfaden für Fullhan SZ B22705 mit Firmware 7.6.23](docs/camera-sz-b22705.md) beschreibt bestätigte RTSP-Streams, Diagnosezugang und Firmware-Sicherung. Diese Plattform benötigt eine eigene Laufzeitumgebung; das Anyka-Paket darf darauf nicht installiert werden.
+
 ## Erste Schritte
 
 1. **Modell und Firmware prüfen.** Vergleichen Sie Ihre Kamera mit der [Kompatibilitätsübersicht](docs/integration.md) und dem passenden Kameraleitfaden.

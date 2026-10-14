@@ -24,6 +24,7 @@ The [LSC Smart PTZ 3007325.5 / SI L25502 guide](camera-3007325.5.md) covers firm
 | [Troubleshooting](troubleshooting.md) | Offline camera, playback problems and useful logs. |
 | [Firmware backup](firmware-backup.md) | Separate NOR backup kit and host verification. |
 | [3007325.5 camera](camera-3007325.5.md) | Exact firmware identity, local mode, diagnostics and device evidence. |
+| [Fullhan SZ B22705 camera](camera-sz-b22705.md) | Stock RTSP, diagnostic access, exact hardware and verified manual NOR backup; separate runtime required. |
 | [Building and testing](building.md) | Linux dependencies, cross-compilation, verification and regression tests. |
 | [Integration and compatibility](integration.md) | Upstream PRs, issue disposition and historical validation. |
 | [Release notes](release.md) | Published packages and release limitations. |

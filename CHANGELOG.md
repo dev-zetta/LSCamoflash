@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixes
+
+- Keep NOR firmware collection running when an optional process disappears during `/proc` inspection, and discard incomplete optional map snapshots. Required flash metadata and paired-read verification remain strict.
+- Verify the Fullhan FH8626V100 SZ B22705 / firmware 7.6.23 diagnostic entry and manual backup path: all six exposed NOR partitions have matching repeated reads, totaling 8 MiB, with a host-verified stock userspace archive. Proprietary firmware and configuration remain private.
+
 ### Documentation
 
 - Rework the English and German READMEs around compatibility, release downloads and first setup; move build instructions, configuration, SD layout and troubleshooting details into dedicated guides under `docs/`.

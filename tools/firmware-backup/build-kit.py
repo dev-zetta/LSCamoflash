@@ -16,7 +16,7 @@ REPO = HERE.parents[1]
 FORMAT = "lscamoflash-nor-backup-kit-v1"
 CARD_FILES = {"hostapd", "busybox", "dump.sh", "_ht_ap_mode.conf", "_ht_get_log.conf", "SHA256SUMS"}
 PACKAGE_FILES = {"README.md", "verify-backup.py", "manifest.json", "SHA256SUMS"}
-APPLETS = {"sh", "awk", "cat", "cmp", "date", "dd", "df", "dmesg", "du", "find", "id", "mkdir", "mv", "readlink", "rmdir", "sha256sum", "stat", "sync", "tar", "timeout", "tr", "true", "uname", "wc"}
+APPLETS = {"sh", "awk", "cat", "cmp", "date", "dd", "df", "dmesg", "du", "find", "id", "mkdir", "mv", "readlink", "rm", "rmdir", "sha256sum", "stat", "sync", "tar", "timeout", "tr", "true", "uname", "wc"}
 
 
 def digest(path):

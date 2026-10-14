@@ -6,6 +6,8 @@ The kit does not erase, program or restore flash. Stock startup itself copies th
 
 Backups, configuration archives and logs can contain Wi-Fi, cloud and device credentials. Keep the complete result in private storage. Share the public scripts and redacted technical findings, not your firmware dump or raw logs.
 
+For the Fullhan SZ B22705 running 7.6.23, use its separate [manual backup entry](camera-sz-b22705.md#manual-backup-through-the-stock-shell). Its six exposed NOR partitions and stock userspace were verified through the collector and host verifier. The Anyka SD `hostapd` launcher and AP markers below do not apply to that camera.
+
 ## Download or build the kit
 
 Download `LSCamoflash-<version>-backup-kit.tar.gz` and `SHA256SUMS` from the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest), verify the archive against its checksum, and extract it into a new folder. The kit contains `card/`, `verify-backup.py`, instructions, a manifest and checksums. It requires no runtime installation or compilation. Python 3.9 or later is needed for host verification.

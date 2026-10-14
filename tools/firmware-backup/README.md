@@ -4,6 +4,8 @@ This kit collects every exposed NOR MTD partition twice, checks exact byte count
 
 The complete path was physically verified on LSC Smart PTZ Camera 3007325.5 / SI L25502, firmware V1.0.0 (6.2863.125), with eight exposed partitions totaling 8 MiB. That result establishes partition backup and host verification. Whole-chip coverage, restoration, and compatibility with other hardware or firmware remain separate questions. Backups and logs can contain device credentials and identifiers; keep them private.
 
+The collector was also verified through an authenticated manual shell on [Fullhan SZ B22705, firmware 7.6.23](https://github.com/dev-zetta/LSCamoflash/blob/main/docs/camera-sz-b22705.md#manual-backup-through-the-stock-shell), collecting all six exposed NOR partitions totaling 8 MiB. That path reuses only the static BusyBox and collector; do not install this kit's Anyka `hostapd` or AP markers on Fullhan. Use current source containing the optional-process race fix for that manual procedure.
+
 ## Build
 
 Use Python 3.9 or later, the repository's ARM uClibc toolchain, and its built static BusyBox. The default paths are resolved relative to this repository, regardless of the working directory:

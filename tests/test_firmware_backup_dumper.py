@@ -6,7 +6,8 @@ QEMU = os.environ.get('BACKUP_QEMU')
 ARM_BB = os.environ.get('BACKUP_ARM_BUSYBOX')
 HOST_BB = shutil.which(os.environ.get('HOST_BUSYBOX', 'busybox'))
 SOURCE = (REPO / 'tools/firmware-backup/backup-nor.sh').read_text()
-SUCCESS_CASES={'ok','nor256','nor256-stacked','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','run-collision'}
+PROCESS_SNAPSHOT_CASES={'process-snapshot','process-comm-race','process-maps-race','process-maps-partial'}
+SUCCESS_CASES={'ok','nor256','nor256-stacked','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','run-collision'} | PROCESS_SNAPSHOT_CASES
 MOUNT_FAILURE_CASES={'not-sd','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','sd-stat-error'}
 NOR256_CASES=['nor256','nor256-stacked','nor256-nand','nor256-oob','nor256-zero','nor256-unsupported','nor256-erase-unaligned','nor256-size-unaligned','nor256-erase-division']
 def fixture(case, target=False):
@@ -27,6 +28,11 @@ def fixture(case, target=False):
         (fs/'lib/libavssdkbeta.so').write_bytes(b'FAKE-MATCHING-LIB\x00')
         (fs/'lib/libalias.so').symlink_to('libavssdkbeta.so')
         (fs/'etc/fixture.conf').write_text('not-a-real-secret\n')
+        if case in PROCESS_SNAPSHOT_CASES:
+            process=proc/'2135';process.mkdir()
+            (process/'comm').write_text('anyka_ipc\n')
+            (process/'maps').write_text('fixture-process-mapping\n')
+            (process/'exe').symlink_to(fs/'usr/bin/anyka_ipc')
         s=SOURCE
         for key,val in [('PROC',proc),('SYS',sys),('DEV',dev),('FS_ROOT',fs)]:
             s=s.replace(key+'=/'+{'PROC':'proc','SYS':'sys','DEV':'dev','FS_ROOT':''}[key]+'\n',key+'='+str(val)+'\n',1)
@@ -109,6 +115,17 @@ def fixture(case, target=False):
             else:
                 behavior='if [ "$1" = dd ]; then\n  out=\n  for arg do case "$arg" in of=*) out=${arg#of=};; esac; done\n  "'+str(real)+'" "$@" || exit $?\n  case "$out" in *read2.part) "'+str(real)+'" dd if=/dev/zero of="$out" bs=4096 count=1 2>/dev/null;; esac\n  exit 0\nfi\n'
             bb.write_text('#!/bin/sh\n'+behavior+'exec "'+str(real)+'" "$@"\n');bb.chmod(0o755)
+        race_marker=root/'process-race-triggered'
+        if case in ('process-comm-race','process-maps-race','process-maps-partial'):
+            real=sd/'real-busybox';bb.rename(real)
+            vanished=proc/'2135'/('comm' if case=='process-comm-race' else 'maps')
+            behavior=(
+                f'if [ "$1" = cat ] && [ "${{2-}}" = "{vanished}" ]; then\n'
+                f'  "{real}" rm -f "$2" || exit $?\n'
+                f'  printf "triggered\\n" > "{race_marker}"\n'
+                + ('  printf "incomplete-process-mapping\\n"; exit 7\n' if case=='process-maps-partial' else '')
+                + 'fi\n')
+            bb.write_text('#!/bin/sh\n'+behavior+f'exec "{real}" "$@"\n');bb.chmod(0o755)
         before={str(p.relative_to(dev)):hashlib.sha256(p.read_bytes()).hexdigest() for p in dev.iterdir() if p.is_file()}
         t=time.monotonic();r=subprocess.run(command,cwd='/',stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=45)
         duration=time.monotonic()-t
@@ -127,6 +144,14 @@ def fixture(case, target=False):
             ok=ok and not runs and 'No unused backup run directory' in r.stderr
         if case in SUCCESS_CASES:
             ok=ok and status.startswith('VERIFIED_NOR_BACKUP')
+            if case in PROCESS_SNAPSHOT_CASES:
+                maps=run/'meta/anyka_ipc-2135-maps.txt'
+                exe=run/'meta/anyka_ipc-2135-exe.txt'
+                if case=='process-snapshot':
+                    ok=ok and maps.read_text()=='fixture-process-mapping\n' and exe.read_text().strip()==str(fs/'usr/bin/anyka_ipc')
+                else:
+                    ok=ok and race_marker.read_text()=='triggered\n' and not maps.exists()
+                    ok=ok and (not exe.exists() if case=='process-comm-race' else exe.read_text().strip()==str(fs/'usr/bin/anyka_ipc'))
             if case.startswith('nor256'):
                 import csv
                 with (run/'partitions.tsv').open() as stream:
@@ -153,8 +178,8 @@ def fixture(case, target=False):
         item={'case':case,'shell':'ARM BusyBox/QEMU' if target else 'host BusyBox','exit_code':r.returncode,'duration_seconds':round(duration,3),'pass':ok,'fixture':str(root),'status':status.strip(),'stdout':r.stdout.strip(),'stderr':r.stderr.strip(),'log_tail':log[-1200:] if not ok else ''}
         if not ok:raise AssertionError(item)
 
-HOST_CASES = ['ok','nand','type-missing','geometry','devnum','size-cap','short-read','unstable','wc-error','extra-sysfs','not-sd','deadline','timeout','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','sd-stat-error','run-collision','run-collision-exhausted'] + NOR256_CASES
-ARM_CASES = ['ok','nand','short-read','unstable','wc-error','timeout','stacked-tmpfs','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','run-collision','run-collision-exhausted'] + NOR256_CASES
+HOST_CASES = ['ok','nand','type-missing','geometry','devnum','size-cap','short-read','unstable','wc-error','extra-sysfs','not-sd','deadline','timeout','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','sd-stat-error','run-collision','run-collision-exhausted'] + NOR256_CASES + sorted(PROCESS_SNAPSHOT_CASES)
+ARM_CASES = ['ok','nand','short-read','unstable','wc-error','timeout','stacked-tmpfs','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','run-collision','run-collision-exhausted'] + NOR256_CASES + sorted(PROCESS_SNAPSHOT_CASES)
 
 class DumperTests(unittest.TestCase):
     pass

@@ -136,10 +136,16 @@ tool uname -a > "$OUT/meta/uname.txt"
 tool dmesg > "$OUT/meta/dmesg-before.txt" 2>&1 || :
 for pid_path in "$PROC"/[0-9]*; do
     [ -r "$pid_path/comm" ] || continue
-    comm=$(tool cat "$pid_path/comm")
+    # Processes can exit after the readability check. These snapshots are
+    # optional; required flash metadata below must still fail on read errors.
+    comm=$(tool cat "$pid_path/comm" 2>/dev/null) || continue
     [ "$comm" = anyka_ipc ] || continue
     pid=${pid_path##*/}
-    [ ! -r "$pid_path/maps" ] || tool cat "$pid_path/maps" > "$OUT/meta/anyka_ipc-$pid-maps.txt"
+    if [ -r "$pid_path/maps" ]; then
+        if ! tool cat "$pid_path/maps" > "$OUT/meta/anyka_ipc-$pid-maps.txt" 2>/dev/null; then
+            tool rm -f "$OUT/meta/anyka_ipc-$pid-maps.txt" || :
+        fi
+    fi
     tool readlink "$pid_path/exe" > "$OUT/meta/anyka_ipc-$pid-exe.txt" 2>&1 || :
 done
 # Capture the complete standard userspace trees together; tar preserves symlinks.
