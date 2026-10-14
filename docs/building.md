@@ -61,7 +61,7 @@ Use the [firmware backup guide](firmware-backup.md) for the kit's staging proced
 
 The [SZ B22705 / firmware 7.6.23 pilot](camera-sz-b22705.md) has a manually started management interface, bounded read-only recording downloads and an optional isolated ONVIF service. It has its own package and does not use the Anyka runtime, installer or SD bootstrap. The richer interface, recording downloads and direct ONVIF service passed short live checks on the tested camera; the linked guide records measurements and remaining acceptance limits.
 
-To build the static ONVIF candidate and include it in a credential-free Fullhan payload, run from the repository root:
+To build the static ONVIF service and include it in a credential-free Fullhan payload, run from the repository root:
 
 ```sh
 QEMU_ARM=/usr/bin/qemu-arm make -C SOURCE fullhan-busybox-kit fullhan-onvif-kit fullhan-kit \
@@ -90,7 +90,7 @@ Independent ONVIF credentials remain mandatory for service startup. The only ano
 
 `httpd.conf`, `onvif.auth` and `onvif.uuid` stay outside the served `www/` directory and are excluded from the public payload checksum list. Keep these site-owned files and all private output copies out of the repository and published artifacts. Preserve the existing ONVIF credentials and UUID when replacing a stopped installation so clients retain the same endpoint identity; the builder generates a fresh UUID for a newly provisioned copy.
 
-The builder checks static ARM ELF attributes, includes license notices and records public payload checksums. `--qemu` also verifies BusyBox applets, HTTP authentication support and helper invalid-input behavior under ARM1176. The optional ONVIF build records its source inputs and patch provenance. Neither builder installs files on a camera. CI is configured to publish a separate credential-free experimental Fullhan artifact; it is separate from the eight stable release assets.
+The builder checks static ARM ELF attributes, includes license notices and records public payload checksums. `--qemu` also verifies BusyBox applets, HTTP authentication support and helper invalid-input behavior under ARM1176. The optional ONVIF build records its source inputs and patch provenance. Neither builder installs files on a camera. CI produces the credential-free Fullhan payload independently and release preparation packages it as `LSCamoflash-<version>-fullhan.tar.gz`. It is a separate experimental platform asset among the nine v2 release files; private authentication and UUID files must never be included.
 
 Follow the [camera guide](camera-sz-b22705.md#experimental-fullhan-management-interface) for placement, mandatory authentication, separate manual HTTP/ONVIF start and stop commands, and acceptance limits. Each camera reboot still requires `start.sh` and, if ONVIF is used, `onvif-start.sh --no-discovery` to be started manually. This unit’s stock application owns UDP 3702; the new authenticated service uses manual client setup at port 5000 and leaves stock discovery untouched.
 
@@ -160,7 +160,7 @@ cd release
 sha256sum --strict --check SHA256SUMS
 ```
 
-This produces the versioned runtime archives, a packaged backup kit, a public source bundle, license notices and `SHA256SUMS`. The source bundle includes tracked public files and hydrated declared build inputs; it excludes private `.local/` data and untracked files. The helper checks archive consistency and source input hashes, but does not run the build or its runtime verifier for you. It refuses to replace a nonempty output directory.
+After the separate Fullhan build above, this produces the Anyka full/update archives, credential-free Fullhan archive, packaged backup kit, public source bundle, license notices and `SHA256SUMS` (nine release assets). The source bundle includes tracked public files and hydrated declared build inputs; it excludes private `.local/` data and untracked files. The helper checks archive consistency and source input hashes, but does not run the build or its runtime verifier for you. It refuses to replace a nonempty output directory.
 
 See the [release guide](release.md) for published packages and release information, the [changelog](../CHANGELOG.md) for changes, and the [third-party notices](../SOURCE/3RD_PARTY_LICENSES.md) for bundled components and their source/license requirements.
 
@@ -168,7 +168,7 @@ See the [release guide](release.md) for published packages and release informati
 
 Publishing is a separate maintainer step with repository write access. The [Publish Release workflow](../.github/workflows/release.yml) publishes the assets from a successful CI build; it does not rebuild them on the release runner.
 
-1. Set the next version in `SOURCE/version.txt`, using the required `1.xx.xxxx` format. For a revision bump, run `make -C SOURCE update-version-revision`. Add a matching `## [<version>]` entry with the release date and changes to `CHANGELOG.md`.
+1. Set the next version in `SOURCE/version.txt`, using the required `major.minor.revision` format: a positive major without leading zeros, two minor digits and four revision digits, for example `2.00.0000`. For a revision bump, run `make -C SOURCE update-version-revision`; `update-version-major` resets the minor/revision fields to `00.0000`. Add a matching `## [<version>]` entry with the release date and changes to `CHANGELOG.md`.
 2. Review and commit the version, changelog and public source changes, then push the release commit to `main`. Keep firmware dumps, credentials, card contents and private logs out of the commit.
 3. Wait for **Build-Test**, **Shell regressions** and **CodeQL Advanced** to succeed for that exact commit. Record the successful Build-Test run ID from its Actions URL. The release gate requires a completed successful run of `makefile.yml` in this repository, from a trusted push or manual dispatch, with the same commit SHA as the release workflow. If the validated release artifact has expired, rerun Build-Test for that commit.
 4. In the fork's **Actions → Publish Release → Run workflow**, select `main` and enter the Build-Test run ID in `build_run_id`. Confirm that `main` still points to the validated commit. Alternatively, use an authenticated GitHub CLI:
@@ -180,6 +180,6 @@ Publishing is a separate maintainer step with repository write access. The [Publ
      -f build_run_id="$BUILD_RUN_ID"
    ```
 
-5. Wait for the publishing run to finish successfully. Confirm that the new `v<version>` tag points to the validated commit, the release contains all eight expected assets, and the downloaded assets pass `sha256sum --strict --check SHA256SUMS` when collected together. The seven checksummed files are the full runtime, update, backup kit, source bundle, `LICENSE.MIT`, `COPYING.BusyBox` and `THIRD_PARTY_NOTICES.md`; `SHA256SUMS` is the eighth asset.
+5. Wait for the publishing run to finish successfully. Confirm that the new `v<version>` tag points to the validated commit, the release contains all nine expected assets, and the downloaded assets pass `sha256sum --strict --check SHA256SUMS` when collected together. The eight checksummed files are the Anyka full runtime, Anyka update, Fullhan management, backup kit, source bundle, `LICENSE.MIT`, `COPYING.BusyBox` and `THIRD_PARTY_NOTICES.md`; `SHA256SUMS` is the ninth asset. Confirm that the Fullhan archive contains the exact named folder and no site credentials, UUID, logs or state.
 
 The workflow checks the CI artifact's SHA-256 manifest, refuses an existing version tag, and creates the release at the validated commit using `CHANGELOG.md` as its notes. The Build-Test match is enforced by the workflow; waiting for the other checks remains part of the maintainer procedure. Fix a failed run before treating the release as published, and use a new version for a later release rather than replacing an existing tag.

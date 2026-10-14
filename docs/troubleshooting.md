@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Fullhan SZ B22705 / 7.6.23 uses a separate package and private accounts with no default password. Follow its [manual HTTP/ONVIF startup and diagnostics](camera-sz-b22705.md#start-and-use-it); the Anyka defaults and local-mode instructions below do not apply to it.
+
 Start with your camera's exact firmware identity and the [installation guide](installation.md). For LSC Smart PTZ 3007325.5 / SI L25502, the [camera guide](camera-3007325.5.md) contains detailed boot diagnostics and device evidence.
 
 ## The camera is offline or has no DHCP lease

@@ -1,6 +1,6 @@
 # Configuration and everyday use
 
-Complete the [installation guide](installation.md) first. Features and stream endpoints depend on the exact firmware; use your model's guide rather than settings copied from another camera.
+This guide covers the **Anyka runtime**. For Fullhan management, passwords, recording downloads and manual ONVIF startup, use the [SZ B22705 guide](camera-sz-b22705.md). Complete the [Anyka installation guide](installation.md) first. Features and stream endpoints depend on the exact firmware; use your model's guide rather than settings copied from another camera.
 
 ## Open the web interface
 
@@ -59,15 +59,15 @@ The system-status page uses the kernel's `MemAvailable` estimate where available
 
 ## Updates
 
-Download the update asset and `SHA256SUMS` from the [fork's releases](https://github.com/dev-zetta/LSCamoflash/releases/latest), verify the checksum and keep a private copy of the working card first. The update package excludes `HACK/etc/` and the root crontab; it is for an existing installation.
+Download `update-2.00.0000-uclibc.tgz` and `SHA256SUMS` from [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000), verify the checksum and keep a private copy of the working card first. The update package excludes `HACK/etc/` and the root crontab; it is for an existing installation.
 
 To stage a release update offline, power the camera off, mount the runtime card on the computer, and extract the update archive's `mmcblk0p1/` and `mmcblk0p2/` directories into a new `UPDATE/` directory beside `HACK/`. In the traditional layout, `UPDATE/` belongs on partition 2. Do not put the compressed archive there without extracting it. Review the archive listing before extraction and retain any existing failed update rather than merging over it.
 
 On the next boot, the runtime updater copies the boot files to the boot card and the runtime files to its runtime root. Successful installation removes the staged update and rebuilds the overlay. A failed copy, mount or sync keeps the staged files and stops startup; preserve `HACK/var/log/update.log` when diagnosing it. Replace the supplied launcher and its helper together through the complete package.
 
-Manual staging does **not** update `HACK/etc/version.txt`, because the update archive excludes configuration. After confirming successful installation (`UPDATE/` is gone and `HACK/var/log/update-last.log` records completion), power off, remount the card and set that single file to the exact installed release version, such as `1.03.2413`, followed by a newline. Safely eject and cold-boot again. Leave the metadata unchanged while an update is failed or pending, and do not replace the entire `HACK/etc/` directory. This describes the updater's current source behavior; a physical offline-update test remains separate.
+Manual staging does **not** update `HACK/etc/version.txt`, because the update archive excludes configuration. After confirming successful installation (`UPDATE/` is gone and `HACK/var/log/update-last.log` records completion), power off, remount the card and set that single file to the exact installed release version, such as `2.00.0000`, followed by a newline. Safely eject and cold-boot again. Leave the metadata unchanged while an update is failed or pending, and do not replace the entire `HACK/etc/` directory. This describes the updater's current source behavior; a physical offline-update test remains separate.
 
-The legacy automatic updater expects a configured server with `version.txt` and a matching `update-<version>.tgz`; its `%device_uid%` placeholder can select a per-device path. GitHub Releases is not configured as that server, and there is no published fork autobuild feed. Use verified release assets for manual updates. See [Building and testing](building.md) for creating packages and [release notes](release.md) for their contents.
+The legacy automatic updater expects a configured server with `version.txt` and a matching `update-<version>.tgz`; its `%device_uid%` placeholder can select a per-device path. For v2.00.0000, a custom feed must serve or alias `update-2.00.0000.tgz`; the downloadable release asset is named `update-2.00.0000-uclibc.tgz`. GitHub Releases is not configured as that server, the default feed points to loopback, and there is no published fork autobuild feed. Host/ARM format checks of the older updater do not establish a physically verified OTA upgrade. Use verified release assets for manual updates. See [Building and testing](building.md) for creating packages and [release notes](release.md) for their contents.
 
 ## SD card layout and recovery
 

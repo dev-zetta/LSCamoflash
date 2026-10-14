@@ -15,7 +15,7 @@ SCRIPT = ROOT / 'SOURCE/src/bin/prepare-release.py'
 SPEC = importlib.util.spec_from_file_location('prepare_release', SCRIPT)
 RELEASE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RELEASE)
-VERSION = '1.02.0001'
+VERSION = '2.00.0000'
 VERSION_FILE = 'mmcblk0p2/HACK/etc/version.txt'
 
 
@@ -31,6 +31,15 @@ def sums(directory, names):
     (directory / 'SHA256SUMS').write_text(''.join(
         f'{hashlib.sha256((directory / name).read_bytes()).hexdigest()}  {name}\n'
         for name in sorted(names)))
+
+
+class ReleaseVersionTests(unittest.TestCase):
+    def test_positive_major_and_fixed_minor_build_widths(self):
+        for version in ('1.03.2413', '2.00.0000', '10.03.2413'):
+            self.assertEqual(RELEASE.version_text((version + '\r\n').encode()), version)
+        for version in ('0.00.0000', '01.00.0000', '-2.00.0000', '2.0.0000', '2.00.000', '2.00.0000 extra'):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                RELEASE.version_text(version.encode())
 
 
 @unittest.skipUnless(shutil.which('git'), 'Git required for tracked-source boundary')
@@ -59,6 +68,11 @@ URLS := \\
 ''')
         self.write('SOURCE/src/config/busybox.config', b'CONFIG_STATIC=y\n')
         self.write('SOURCE/src/patches/ffmpeg/configure', b'public build patch\n')
+        for name in RELEASE.FULLHAN_SOURCE_FILES:
+            self.write('SOURCE/src/fullhan/' + name, ('public Fullhan ' + name + '\n').encode())
+        self.write('SOURCE/src/fullhan/busybox-http-range.patch', b'public CGI Range patch\n')
+        self.write('SOURCE/src/fullhan/onvif-readonly.patch', b'public ONVIF authentication patch\n')
+        self.write('SOURCE/src/patches/busybox-1.0/uclibc-config', b'CONFIG_STATIC=y\n')
         self.write('public.txt', b'public source\n')
         self.write('.local/secret.txt', b'private research must never ship\n')
         self.write('SOURCE/download/undeclared.tar.gz', b'private undeclared download\n')
@@ -91,6 +105,40 @@ URLS := \\
         (self.kit / 'manifest.json').write_text(json.dumps({'format': 'lscamoflash-nor-backup-kit-v1'}))
         sums(self.kit / 'card', {Path(name).name for name in RELEASE.KIT_FILES if name.startswith('card/')} - {'SHA256SUMS'})
         sums(self.kit, RELEASE.KIT_FILES - {'SHA256SUMS'})
+        self.fullhan = self.source / 'fullhan-kit/LSCamoflash-fullhan'
+        self.fullhan.mkdir(parents=True)
+        for name in RELEASE.FULLHAN_PAYLOAD_FILES:
+            path = self.fullhan / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if name in RELEASE.FULLHAN_SOURCE_FILES:
+                path.write_bytes((self.source / 'src/fullhan' / name).read_bytes())
+            else:
+                path.write_bytes(('synthetic Fullhan ' + name + '\n').encode())
+        (self.fullhan / 'LICENSE.MIT').write_bytes((self.root / 'LICENSE').read_bytes())
+        (self.fullhan / 'COPYING.BusyBox').write_bytes(b'BusyBox GPL version 2 fixture\n')
+        def report(name):
+            path = self.fullhan / 'bin' / name
+            return {'bytes': path.stat().st_size, 'sha256': RELEASE.digest(path), 'static': True, 'cpu_arch': 'v5TEJ'}
+        busybox = {'format': 'lscamoflash-fullhan-busybox-v1', 'sha256': report('busybox')['sha256'],
+                   'cgi_range_header': True, 'arm1176_smoke': True, 'elf': report('busybox'),
+                   'source_archive': {'name': 'busybox-1.0.tar.bz2', 'sha256': RELEASE.digest(self.download / 'busybox-1.0.tar.bz2')},
+                   'patch_sha256': RELEASE.digest(self.source / 'src/fullhan/busybox-http-range.patch'),
+                   'base_config_sha256': RELEASE.digest(self.source / 'src/patches/busybox-1.0/uclibc-config')}
+        onvif = {'format': 'lscamoflash-fullhan-onvif-v1', 'sha256': report('onvif_srvd')['sha256'],
+                 'arm1176_smoke': True, 'elf': report('onvif_srvd'),
+                 'authentication': ['WSSE UsernameToken', 'HTTP Digest'], 'pre_auth_operations': ['GetSystemDateAndTime'],
+                 'patch_sha256': RELEASE.digest(self.source / 'src/fullhan/onvif-readonly.patch'),
+                 'source_archives': {'tiny-toolchain.tar.bz2': RELEASE.digest(self.download / 'tiny-toolchain.tar.bz2')}}
+        self.write('SOURCE/fullhan-busybox/manifest.json', json.dumps(busybox).encode())
+        self.write('SOURCE/fullhan-onvif/manifest.json', json.dumps(onvif).encode())
+        self.write('SOURCE/fullhan-onvif/COPYING.ONVIF', (self.fullhan / 'COPYING.ONVIF').read_bytes())
+        self.fullhan_manifest = {'format': 'lscamoflash-fullhan-management-v2', 'stock_sha256': RELEASE.FULLHAN_STOCK_SHA,
+                                 'credentials_provisioned': False, 'onvif_credentials_provisioned': False,
+                                 'onvif_included': True, 'arm1176_smoke': True, 'busybox': report('busybox'),
+                                 'busybox_provenance': busybox, 'onvif_provenance': onvif,
+                                 'helpers': {name: report(name) for name in ('fullhan-recordings', 'fullhan-discovery')},
+                                 'files': {name: RELEASE.digest(self.fullhan / name) for name in RELEASE.FULLHAN_PAYLOAD_FILES}}
+        self.fullhan_sums()
 
     def git(self, *arguments):
         return subprocess.run(['git', '-C', str(self.root), *arguments], check=True,
@@ -105,6 +153,10 @@ URLS := \\
     def stage(self):
         return RELEASE.prepare(self.root, self.output)
 
+    def fullhan_sums(self):
+        (self.fullhan / 'manifest.json').write_text(json.dumps(self.fullhan_manifest))
+        sums(self.fullhan, RELEASE.FULLHAN_FILES - {'SHA256SUMS'})
+
     def test_assets_are_byte_exact_and_every_asset_checksum_is_correct(self):
         self.output.mkdir()  # A dedicated empty directory is accepted.
         self.stage()
@@ -116,7 +168,7 @@ URLS := \\
             entries[name] = checksum
             self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), checksum)
         self.assertEqual(set(entries), {p.name for p in self.output.iterdir()} - {'SHA256SUMS'})
-        self.assertEqual(len(entries), 7)
+        self.assertEqual(len(entries), 8)
         self.assertEqual((self.output / 'COPYING.BusyBox').read_bytes(), b'BusyBox GPL version 2 fixture\n')
         self.assertIn('not complete component-source archives', (self.output / 'THIRD_PARTY_NOTICES.md').read_text())
 
@@ -140,6 +192,7 @@ URLS := \\
                 self.assertNotIn('undeclared.tar.gz', name)
                 self.assertNotIn('SOURCE/build', name)
                 self.assertNotIn('SOURCE/backup-kit', name)
+                self.assertNotIn('SOURCE/fullhan-kit', name)
 
     def test_backup_archive_is_separate_and_includes_project_and_busybox_licenses(self):
         self.stage()
@@ -151,7 +204,7 @@ URLS := \\
             self.assertNotIn('mmcblk0p1', names)
 
     def test_invalid_or_mismatched_versions_fail_before_output(self):
-        for version in ('1.2.0001', '1.02.001', '2.02.0001', '1.02.0001 extra', '../1.02.0001'):
+        for version in ('1.2.0001', '1.02.001', '0.02.0001', '01.02.0001', '2.00.0000 extra', '../2.00.0000'):
             with self.subTest(version=version):
                 self.write('SOURCE/version.txt', (version + '\n').encode())
                 with self.assertRaises(ValueError):
@@ -234,6 +287,77 @@ URLS := \\
         self.assertEqual(list(self.output.iterdir()), [sentinel])
         self.assertEqual(sentinel.read_bytes(), b'preserve existing files\n')
 
+    def test_fullhan_archive_has_fixed_install_root_exact_public_inventory_and_licenses(self):
+        self.stage()
+        with tarfile.open(self.output / f'LSCamoflash-{VERSION}-fullhan.tar.gz') as archive:
+            members = {member.name: member for member in archive}
+            self.assertEqual(set(members), {'LSCamoflash-fullhan/' + name for name in RELEASE.FULLHAN_FILES})
+            for name in RELEASE.FULLHAN_FILES:
+                self.assertEqual(archive.extractfile(members['LSCamoflash-fullhan/' + name]).read(), (self.fullhan / name).read_bytes())
+            for private in ('httpd.conf', 'onvif.auth', 'onvif.uuid', 'startup.log'):
+                self.assertNotIn('LSCamoflash-fullhan/' + private, members)
+
+    def test_fullhan_missing_kit_credentials_or_unknown_files_are_rejected_before_output(self):
+        for name in ('httpd.conf', 'onvif.auth', 'onvif.uuid', 'startup.log', 'private-firmware.bin'):
+            path = self.fullhan / name
+            path.write_bytes(b'private site data must never ship\n')
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'Fullhan kit contains missing or unexpected'):
+                self.stage()
+            path.unlink()
+            self.assertFalse(self.output.exists())
+        shutil.rmtree(self.fullhan)
+        with self.assertRaisesRegex(ValueError, 'Fullhan kit contains missing or unexpected'):
+            self.stage()
+
+    def test_fullhan_coherently_rehashed_credential_flags_and_manifest_inventory_are_rejected(self):
+        for field in ('credentials_provisioned', 'onvif_credentials_provisioned'):
+            self.fullhan_manifest[field] = True
+            self.fullhan_sums()
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'credential-free'):
+                self.stage()
+            self.fullhan_manifest[field] = False
+        del self.fullhan_manifest['files']['bin/onvif_srvd']
+        self.fullhan_sums()
+        with self.assertRaisesRegex(ValueError, 'manifest inventory'):
+            self.stage()
+        self.assertFalse(self.output.exists())
+
+    def test_fullhan_payload_and_source_provenance_must_match_current_inputs(self):
+        binary = self.fullhan / 'bin/onvif_srvd'
+        original = binary.read_bytes()
+        binary.write_bytes(original + b'corrupt')
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            self.stage()
+        binary.write_bytes(original)
+        # Rehashed manifest/checksum text cannot approve a mismatched binary
+        # build record or an old public source patch.
+        self.fullhan_manifest['onvif_provenance']['sha256'] = '0' * 64
+        self.fullhan_sums()
+        with self.assertRaisesRegex(ValueError, 'ONVIF provenance'):
+            self.stage()
+        self.fullhan_manifest['onvif_provenance']['sha256'] = RELEASE.digest(binary)
+        self.fullhan_sums()
+        self.write('SOURCE/src/fullhan/onvif-readonly.patch', b'new public authentication patch\n')
+        with self.assertRaisesRegex(ValueError, 'ONVIF provenance'):
+            self.stage()
+        self.assertFalse(self.output.exists())
+
+    def test_fullhan_symlink_and_rehashed_license_mismatch_are_rejected(self):
+        path = self.fullhan / 'COPYING.ONVIF'
+        original = path.read_bytes()
+        path.unlink()
+        path.symlink_to(self.external)
+        with self.assertRaisesRegex(ValueError, 'must not contain symlinks'):
+            self.stage()
+        path.unlink()
+        path.write_bytes(b'changed license\n')
+        self.fullhan_manifest['files']['COPYING.ONVIF'] = RELEASE.digest(path)
+        self.fullhan_sums()
+        with self.assertRaisesRegex(ValueError, 'ONVIF license'):
+            self.stage()
+        self.assertNotEqual(original, path.read_bytes())
+        self.assertFalse(self.output.exists())
+
     def test_symlink_download_and_tracked_parent_redirect_are_rejected(self):
         path = self.download / 'tiny-toolchain.tar.bz2'
         path.unlink()
@@ -258,7 +382,7 @@ URLS := \\
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('Prepared public release assets:', result.stdout)
-        self.assertEqual(len(list(self.output.iterdir())), 8)
+        self.assertEqual(len(list(self.output.iterdir())), 9)
 
 
 if __name__ == '__main__':

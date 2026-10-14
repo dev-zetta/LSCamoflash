@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -51,6 +52,13 @@ REQUIRED_ARCHIVE_FILES = {
     'mmcblk0p2/HACK/sbin/anyka_ipc_wrapper.sh',
     'mmcblk0p2/HACK/lib/libcamoflash_rtsp.so',
 }
+
+
+def read_version(path):
+    value = path.read_text(encoding='ascii').strip()
+    if not re.fullmatch(r'[1-9][0-9]*\.[0-9]{2}\.[0-9]{4}', value):
+        raise ValueError('Version must have the form M.xx.xxxx, with a positive major and no leading zero')
+    return value
 
 
 def scan_elfs(build):
@@ -162,6 +170,7 @@ def file_digest(path):
 
 def check_sources(source, build):
     """Ensure incremental builds include the latest installer and runtime files."""
+    read_version(source / 'version.txt')
     template = source / 'src/sdcard'
     generated_version = Path('mmcblk0p2/HACK/etc/version.txt')
     checked = 0
@@ -224,7 +233,7 @@ def main():
     parser.add_argument('--output', type=Path, help='Save complete JSON results including runtime output')
     args = parser.parse_args()
     build = args.build_dir.resolve()
-    version = (source / 'version.txt').read_text().strip()
+    version = read_version(source / 'version.txt')
     source_files = check_sources(source, build)
     elfs = scan_elfs(build)
     runtime = run_runtime_checks(build / 'mmcblk0p2/HACK', args.qemu)

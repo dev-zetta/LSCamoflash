@@ -15,7 +15,7 @@ Download `LSCamoflash-<version>-backup-kit.tar.gz` and `SHA256SUMS` from the [fo
 The archive contains a versioned top-level directory. Set `KIT_DIR` to that directory, replacing the example version with the release you downloaded:
 
 ```sh
-KIT_DIR="$PWD/LSCamoflash-1.03.2413-backup-kit"
+KIT_DIR="$PWD/LSCamoflash-2.00.0000-backup-kit"
 (cd "$KIT_DIR/card" && sha256sum -c SHA256SUMS)
 ```
 

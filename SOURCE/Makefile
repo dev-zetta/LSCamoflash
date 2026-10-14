@@ -154,7 +154,7 @@ SDCARD := /tmp/sd
 SDROOT := $(SDCARD)/HACK
 
 # Version
-VERSION = $(shell cat version.txt)
+VERSION = $(shell cat "$(ROOT_DIR)/version.txt")
 
 # Host configuration
 HOST_UCLIBC := arm-buildroot-linux-uclibcgnueabi
@@ -1347,13 +1347,13 @@ mrproper-full: download-clean mrproper
 clean: $(GLIBC_CLEAN) $(RADARE2_CLEAN) $(KERNEL_CLEAN) $(PYTHON_CLEAN) $(PHP_CLEAN) $(LIBEXECINFO_CLEAN) $(FFMPEG_CLEAN) $(OPUS_CLEAN) $(OPENJPEG_CLEAN) $(LIBILBC_CLEAN) $(LIBGPG_ERROR_CLEAN) $(GMP_CLEAN) $(LIBGCRYPT_CLEAN) onvif-clean gsoap-clean mosquitto-clean cjson-clean busybox-clean curl-clean miniupnpc-clean msmtp-clean sqlcipher-clean sqlite3-clean strace-clean joe-clean zlib-clean openssl-clean tcpdump-clean libpcap-clean
 
 update-version-major:
-	@$(SRC_DIR)/bin/update-version.sh --major
+	@cd "$(ROOT_DIR)" && "$(SRC_DIR)/bin/update-version.sh" --major
 
 update-version-minor:
-	@$(SRC_DIR)/bin/update-version.sh --minor
+	@cd "$(ROOT_DIR)" && "$(SRC_DIR)/bin/update-version.sh" --minor
 
 update-version-revision:
-	@$(SRC_DIR)/bin/update-version.sh --revision
+	@cd "$(ROOT_DIR)" && "$(SRC_DIR)/bin/update-version.sh" --revision
 	
 version:
 	@cat $(ROOT_DIR)/version.txt

@@ -2,16 +2,46 @@
 
 [ -n "$hack" -a -n "$device_uid" ] || exit 1
 
+# Version parsing is shared by installed and remotely supplied versions.
+update_version_valid()
+{
+	local version_major=${1%%.*} version_rest=${1#*.} version_minor version_revision
+	version_minor=${version_rest%%.*}
+	version_revision=${version_rest#*.}
+	case "$version_major" in ''|0*|*[!0-9]*) return 1 ;; esac
+	case "$version_minor" in [0-9][0-9]) ;; *) return 1 ;; esac
+	case "$version_revision" in [0-9][0-9][0-9][0-9]) ;; *) return 1 ;; esac
+	[ "$1" = "$version_major.$version_minor.$version_revision" ]
+}
+
+update_version_newer()
+{
+	update_version_valid "$1" && update_version_valid "$2" || return 2
+	local new_major=${1%%.*} old_major=${2%%.*} new_rest=${1#*.} old_rest=${2#*.}
+	local new_minor=${new_rest%%.*} old_minor=${old_rest%%.*}
+	local new_revision=${new_rest#*.} old_revision=${old_rest#*.}
+	# Compare decimal text so larger majors never overflow shell integers.
+	if [ "${#new_major}" -ne "${#old_major}" ]; then
+		[ "${#new_major}" -gt "${#old_major}" ]; return
+	fi
+	if [ "$new_major" != "$old_major" ]; then
+		[ "$new_major" \> "$old_major" ]; return
+	fi
+	if [ "$new_minor" != "$old_minor" ]; then
+		[ "$new_minor" \> "$old_minor" ]; return
+	fi
+	[ "$new_revision" \> "$old_revision" ]
+}
+
 VERSION=$(cat "$hack/etc/version.txt") || exit 1
+update_version_valid "$VERSION" || {
+	echo "Error: Invalid installed version; expected M.xx.xxxx with a positive major."
+	exit 1
+}
 
 echo -n "Updater is starting up at " && date
 
 updatetgz="$sd_update/update.tgz"
-
-# Extract version components
-V_MAJOR=$(echo "$VERSION" | cut -d "." -f1)
-V_MINOR=$(echo "$VERSION" | cut -d "." -f2)
-V_REVISION=$(echo "$VERSION" | cut -d "." -f3)
 
 # Copy update files through same-directory temporaries, then rename them.
 # In particular, BusyBox may still be executing from either card partition.
@@ -114,9 +144,10 @@ if [ -z "$UPDATE" ]; then
     exit 1
 fi
 
-U_MAJOR=$(echo "$UPDATE" | cut -d "." -f1)
-U_MINOR=$(echo "$UPDATE" | cut -d "." -f2)
-U_REVISION=$(echo "$UPDATE" | cut -d "." -f3)
+update_version_valid "$UPDATE" || {
+    echo "Error: Invalid update version; expected M.xx.xxxx with a positive major."
+    exit 1
+}
 
 echo -n "Date: " > $sd_log/update.log
 date >> $sd_log/update.log
@@ -124,9 +155,7 @@ echo "Current Version:  $VERSION" >> $sd_log/update.log
 echo "Available Update: $UPDATE" >> $sd_log/update.log
 
 # Compare versions
-if [ "$U_MAJOR" -gt "$V_MAJOR" ] ||
-   { [ "$U_MAJOR" -eq "$V_MAJOR" ] && [ "$U_MINOR" -gt "$V_MINOR" ]; } ||
-   { [ "$U_MAJOR" -eq "$V_MAJOR" ] && [ "$U_MINOR" -eq "$V_MINOR" ] && [ "$U_REVISION" -gt "$V_REVISION" ]; }; then
+if update_version_newer "$UPDATE" "$VERSION"; then
     echo "Download Update: $UPDATE" >> $sd_log/update.log
 
         # Fetch latest version data

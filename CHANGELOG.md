@@ -2,14 +2,22 @@
 
 ## Unreleased
 
+No unreleased changes.
+
+## [2.00.0000] - 2026-10-14
+
+This major release introduces distinct Anyka runtime and experimental Fullhan management packages. The project keeps its custom `major.minor.revision` numbering (`2.00.0000`); the package choice follows the camera’s exact platform and firmware. Downloads and checksums are on the [v2.00.0000 release page](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000).
+
 ### Features
 
 - Add a separate experimental Fullhan FH8626V100 / SZ B22705 firmware 7.6.23 management interface with mandatory authentication, CPU/SD/RAM/service diagnostics, finalized MP4 recording lists and range-aware downloads, and stock RTSP links. Its SD-only package has exact firmware guards, manual startup and owned-process shutdown; it keeps the stock application running. Camera settings, audio and automatic startup remain outside this port.
 - Add an optional static Fullhan ONVIF Device/Media server with WSSE UsernameToken or HTTP Digest authentication, anonymous clock bootstrap for timestamp synchronization, native main/sub H.264 profiles, bounded discovery and guarded independent startup/shutdown. Unsupported camera mutations, PTZ and snapshots return faults.
-- Build and upload the credential-free Fullhan management package separately in CI, including ARM1176 compatibility and SOAP checks. Private site authentication is never included in the public payload.
+- Publish a separate credential-free `LSCamoflash-2.00.0000-fullhan.tar.gz` release asset and build it independently in CI, including ARM1176 compatibility and SOAP checks. It contains the required `LSCamoflash-fullhan/` folder; private dashboard/ONVIF authentication and endpoint UUID must be provisioned before use.
 
 ### Fixes
 
+- Accept positive decimal major versions in build/release validators and the explicit version helper; major/minor bumps reset lower counters to zero, and invalid or overflowing changes preserve the prior version.
+- Build an isolated Fullhan BusyBox with a scoped HTTP Range-to-CGI fix, preserving the shared Anyka and stock binaries. Live authenticated recording requests now return correct partial responses through the complete HTTP path.
 - Include the separate Fullhan recording and discovery helpers in CodeQL extraction by compiling their production branches explicitly.
 - Support SHA-256 HTTP Digest in the ONVIF test client on Python 3.11 and 3.12, preserving the server's authentication algorithm and adding an independent protocol test vector.
 - Keep NOR firmware collection running when an optional process disappears during `/proc` inspection, and discard incomplete optional map snapshots. Required flash metadata and paired-read verification remain strict.
@@ -21,6 +29,14 @@
 - Correct fork download, badge, support, web UI, shell-banner and build-source links while retaining upstream attribution and original issue/PR references.
 - Document ready-made backup-kit downloads and separate web UI/root passwords; replace stale autobuild, camera-acceptance and deleted CI-run links.
 - Enable the fork's issue tracker and private vulnerability reporting, and point support/security instructions to those channels.
+
+### Compatibility and validation
+
+- **Anyka:** keep using the full `-uclibc.tar.gz` runtime or matching `update-...-uclibc.tgz` for supported profiles. The tested 3007325.5 / 6.2863.125.1348 profile retains local H.265 main/H.264 sub video and PCMA audio, explicit local-mode Wi-Fi, manual H.264 ONVIF and disabled toolkit PTZ. Its local mode replaces Tuya app operation; detailed and long-term limits remain in the [camera guide](https://github.com/dev-zetta/LSCamoflash/blob/v2.00.0000/docs/camera-3007325.5.md).
+- **Fullhan:** SZ B22705 / FH8626V100 with stock firmware 7.6.23 requires the separate `-fullhan.tar.gz` package, mandatory private credentials and manual startup after each reboot. Keep the stock application running; do not use Anyka installers, overlays or boot hooks. Stock H.264 main/sub video remains on port 8554, with no audio track advertised in the verified streams.
+- Fullhan recording lists, authenticated HEAD/Range, WSSE and HTTP Digest ONVIF profiles/stream URIs, an independent Zeep client, and owned stop/restart passed short live checks. The optional port-5000 server must be added manually with `--no-discovery` because stock `dgiot` owns UDP 3702 and advertises a separate port-835 endpoint whose SOAP control path remains unverified. Only read-only `GetSystemDateAndTime` is anonymous for WSSE clock synchronization; protected Device/Media operations retain authentication and timestamp/replay checks.
+- Fullhan camera controls, PTZ, microphone forwarding and automatic startup are not implemented. Long-term or multiple-client use, normal app/recording behavior, internet-blocked operation, repeatable cold-boot acceptance and restore remain separate gates. See the [Fullhan guide](https://github.com/dev-zetta/LSCamoflash/blob/v2.00.0000/docs/camera-sz-b22705.md) for exact binary identity, measured resources and bounded evidence.
+- The separate firmware backup kit is not a runtime installer or recovery image. Its Anyka SD launcher must not be used on Fullhan; the verified Fullhan backup uses the generic collector through the stock shell. Proprietary firmware, credentials and logs are excluded from every release asset. Matching exposed-partition backups do not prove whole-chip coverage, atomic capture or a working restore.
 
 ## [1.03.2413] - 2026-10-13
 

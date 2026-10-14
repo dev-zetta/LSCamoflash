@@ -4,80 +4,65 @@
 [![Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-green.svg)](LICENSE)
 
-LSCamoflash erweitert unterstützte LSC-/Tuya-IP-Kameras über eine SD-Karte um eine Weboberfläche, lokale Videostreams und konfigurierbare Dienste. Welche Funktionen verfügbar sind, hängt vom Kameramodell und der genauen Firmware ab.
+LSCamoflash erweitert unterstützte LSC-/Tuya-Kameras über eine SD-Karte um eine Weboberfläche, lokale Videostreams und Firmware-Backup-Werkzeuge. **Anyka und Fullhan benötigen unterschiedliche Pakete.** Der Funktionsumfang hängt von der genauen Hardware und Original-Firmware ab.
 
-Dieser Fork enthält Fehlerkorrekturen, einen dokumentierten Firmware-Backup-Weg und Unterstützung für die unten aufgeführte LSC Smart PTZ Camera.
-
-**[Aktuelles Release herunterladen](https://github.com/dev-zetta/LSCamoflash/releases/latest)** · [Dokumentation](docs/index.md) · [Änderungen](CHANGELOG.md) · [English](README.md)
+**[v2.00.0000 herunterladen](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000)** · [Dokumentation](docs/index.md) · [Änderungen](CHANGELOG.md) · [English](README.md)
 
 ## Was bietet LSCamoflash?
 
-- Eine Weboberfläche für Einstellungen, Dienstverwaltung und Neustart der Kamera.
-- Lokale RTSP-Streams ohne Tuya-Cloud im unterstützten lokalen Betriebsmodus.
-- ONVIF-Anbindung für unterstützte Kameraprofile.
-- Konfigurierbares WLAN und optionale Dienste auf der SD-Karte.
-- Ein separates Backup-Kit zum Sichern der Original-Firmware einer unterstützten Kamera.
+- Lokale RTSP-Streams und ONVIF-Anbindung für unterstützte Profile.
+- Eine Weboberfläche mit Kamera-, CPU-, RAM- und SD-Status.
+- Einen Aufnahmebrowser mit authentifizierten Downloads für das experimentelle Fullhan-Profil.
+- Einstellungen, WLAN- und Dienstverwaltung für unterstützte Anyka-Profile.
+- Separate Werkzeuge zur Sicherung der Original-Firmware.
 
-## Unterstützte Kameras
+## Welches Paket brauche ich?
 
-Die Unterstützung richtet sich nach der **genauen Firmware**, nicht allein nach dem Produktnamen. Ähnlich aussehende Kameras können andere Hardware oder Firmware verwenden.
-
-| Getestete Kamera | Original-Firmware | Auf dem Gerät bestätigt |
+| Getestete Kamera | Datei in v2.00.0000 | Anleitung |
 | --- | --- | --- |
-| LSC Smart PTZ Camera, SI L25502, Artikel 3007325.5 | `6.2863.125.1348` (App: V1.0.0 / 6.2863.125) | Firmware-Backup, SD-Start, WLAN, Weboberfläche, lokale H.265-/H.264-Streams mit PCMA-Mikrofonton und manuelle ONVIF-Anbindung |
+| **Anyka LSC Smart PTZ**, SI L25502 / Artikel 3007325.5, Firmware `6.2863.125.1348` | `LSCamoflash-2.00.0000-uclibc.tar.gz` | [3007325.5](docs/camera-3007325.5.md) |
+| **Fullhan LSC Indoor 1080p**, SZ B22705 / FH8626V100, Firmware `7.6.23` | `LSCamoflash-2.00.0000-fullhan.tar.gz` | [Fullhan-Leitfaden](docs/camera-sz-b22705.md) |
+| **Nur Firmware sichern** | `LSCamoflash-2.00.0000-backup-kit.tar.gz` | [Anyka-SD-Backup](docs/firmware-backup.md) oder [manuelle Fullhan-Sicherung](docs/camera-sz-b22705.md#manual-backup-through-the-stock-shell) |
 
-Dieses Profil ist experimentell. Die PTZ-Steuerung durch LSCamoflash ist für diese Firmware deaktiviert. Automatische ONVIF-Erkennung ist nicht enthalten; fügen Sie die Kamera manuell hinzu. Langzeitbetrieb und detaillierte Audio-/Videosynchronisation sind noch nicht bestätigt.
+Laden Sie zusätzlich `SHA256SUMS` herunter und prüfen Sie das gewählte Archiv. `update-2.00.0000-uclibc.tgz` aktualisiert eine bestehende Anyka-Laufzeit; es installiert oder aktualisiert keine Fullhan-Oberfläche. Der SD-Startmechanismus des Backup-Kits gilt für unterstützte Anyka-Kameras; Fullhan nutzt den separaten manuellen Einstieg.
 
-Der lokale RTSP-Modus ersetzt bei diesem Profil den normalen Tuya-Betrieb und benötigt ausdrücklich konfigurierte WLAN-Zugangsdaten. Die vollständigen Voraussetzungen, Adressen und Grenzen stehen im [Leitfaden für 3007325.5](docs/camera-3007325.5.md).
+## Bestätigte Funktionen und Grenzen
 
-Weitere Profile und den Stand früherer Fehlerberichte beschreibt die [Kompatibilitätsübersicht](docs/integration.md).
+**Anyka 3007325.5:** WLAN, Weboberfläche, lokale H.265-/H.264-Streams mit PCMA-Mikrofonton und manuelle ONVIF-Anbindung wurden auf dem Gerät bestätigt. Der lokale Modus ersetzt den normalen Tuya-Betrieb und benötigt ausdrücklich konfigurierte WLAN-Zugangsdaten. Automatische ONVIF-Erkennung und die PTZ-Steuerung durch LSCamoflash sind für dieses Profil nicht verfügbar.
 
-Der [Leitfaden für Fullhan SZ B22705 mit Firmware 7.6.23](docs/camera-sz-b22705.md) beschreibt bestätigte RTSP-Streams, Firmware-Sicherung und eine separate experimentelle Verwaltungsoberfläche aus dem aktuellen Quellcode mit Aufnahme-Downloads und optionalem authentifiziertem ONVIF. Das Dashboard wird manuell gestartet; die originale Kameraanwendung läuft weiter. Diese Plattform benötigt ein eigenes Paket; das Anyka-Paket darf darauf nicht installiert werden.
+**Fullhan SZ B22705:** Die experimentelle Oberfläche bietet Dashboard, Aufnahmen, Streams und Diagnose, während die originale Kameraanwendung weiterläuft. Kurze Gerätetests bestätigten authentifizierte Aufnahme-HEAD-/Range-Downloads, native H.264-Profile und unabhängige ONVIF-Clients. Private Zugangsdaten und ein manueller Start nach jedem Neustart sind erforderlich. ONVIF wird manuell auf Port 5000 hinzugefügt; die originale Geräteerkennung bleibt unverändert. Kameraeinstellungen, PTZ, Audio-Weiterleitung und automatischer Start sind nicht implementiert.
+
+Die Unterstützung richtet sich nach der **genauen Firmware**, nicht allein nach dem Produktnamen. Weitere Anyka-Profile und offene Prüfungen stehen in der [Kompatibilitätsübersicht](docs/integration.md). Kurze erfolgreiche Tests bestätigen keinen Langzeitbetrieb oder jede Funktion der Original-App.
 
 ## Erste Schritte
 
-1. **Modell und Firmware prüfen.** Vergleichen Sie Ihre Kamera mit der [Kompatibilitätsübersicht](docs/integration.md) und dem passenden Kameraleitfaden.
-2. **Original-Firmware sichern.** Folgen Sie der [Backup-Anleitung](docs/firmware-backup.md) mit einer separaten SD-Karte und bewahren Sie die Sicherung privat auf.
-3. **Das Vollpaket herunterladen.** Wählen Sie im [aktuellen Release](https://github.com/dev-zetta/LSCamoflash/releases/latest) die Datei `LSCamoflash-<version>-uclibc.tar.gz`.
-4. **Die Laufzeit-SD-Karte vorbereiten.** Die [Installationsanleitung](docs/installation.md) erklärt das Entpacken, die Kartenlayouts und die Installationsskripte.
-5. **Betriebsmodus und WLAN einrichten.** Nutzen Sie die [Konfigurationsanleitung](docs/configuration.md) und beachten Sie die Vorgaben Ihres Kameraprofils.
-6. **Kamera starten und prüfen.** Setzen Sie die sicher ausgeworfene Karte bei ausgeschalteter Kamera ein. Prüfen Sie anschließend die zugewiesene IP-Adresse und öffnen Sie `http://<kamera-ip>:8080/`.
+1. **Modell und Firmware prüfen.** Wählen Sie den passenden Kameraleitfaden oben.
+2. **Original-Firmware sichern.** Sichern Sie vorhandene SD-Aufnahmen und folgen Sie dem passenden Backup-Verfahren. Bewahren Sie Firmware und Zugangsdaten privat auf.
+3. **Das passende Paket herunterladen und prüfen.** Nutzen Sie [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) und `SHA256SUMS`.
+4. **Die Karte vorbereiten.** Die [Anyka-Installation](docs/installation.md) beschreibt Kartenlayouts und Installationsskripte. [Fullhan](docs/camera-sz-b22705.md#prepare-the-private-payload) nutzt einen eigenen Ordner, private Zugangsdaten und manuellen Start.
+5. **`http://<kamera-ip>:8080/` öffnen.** Die frische **Anyka**-Weboberfläche verwendet `admin` / `admin`; ändern Sie das Passwort über **Password**. **Fullhan hat kein Standardpasswort** und verwendet Ihr lokal eingerichtetes Konto. Das ONVIF-Konto ist davon getrennt.
 
-Der erste Start kann mehrere Minuten dauern. Schalten Sie die Kamera aus, bevor Sie die Karte entfernen. Falls der Start scheitert, folgen Sie den Diagnosehinweisen im jeweiligen Kameraleitfaden.
+Die veröffentlichten Pakete müssen nicht kompiliert werden. Bei Fullhan sind jedoch lokale Zugangsdaten erforderlich; weder das Kopieren des öffentlichen Archivs noch ein Kameraneustart startet seine Dienste automatisch.
 
-## Welchen Download brauche ich?
-
-| Datei im Release | Verwendung |
-| --- | --- |
-| `LSCamoflash-<version>-uclibc.tar.gz` | Vollpaket für die erste Installation auf der Laufzeit-SD-Karte. |
-| `update-<version>-uclibc.tgz` | Update einer vorhandenen Installation nach der [Update-Anleitung](docs/configuration.md). |
-| `LSCamoflash-<version>-backup-kit.tar.gz` | Separates Kit für die [Original-Firmware-Sicherung](docs/firmware-backup.md); keine Laufzeitinstallation. |
-| `SHA256SUMS` | Prüfsummen zur Kontrolle der heruntergeladenen Dateien. |
-
-Die GitHub-Dateien „Source code (zip)“ und „Source code (tar.gz)“ sind **keine fertigen SD-Karten-Pakete**. Der zusätzliche Release-Quellcode und Informationen zum Selbstbauen sind in der [Build-Anleitung](docs/building.md) beschrieben.
+Sichern Sie die Karte vor Änderungen: Die Anyka-Partitionierungsskripte löschen den ausgewählten Datenträger. Das Entfernen einer SD-Karte macht bereits erfolgte Änderungen der Original-Firmware nicht vollständig rückgängig. Nutzen Sie die Software nur auf eigenen oder ausdrücklich freigegebenen Geräten; beachten Sie die [Nutzungsrichtlinie](USAGE_POLICY.md).
 
 ## Dokumentation
 
 Die ausführlichen Anleitungen werden auf Englisch gepflegt.
 
 - [Dokumentationsübersicht](docs/index.md)
-- [Installation und SD-Karten](docs/installation.md)
-- [Einstellungen, Dienste und Updates](docs/configuration.md)
+- [Release-Pakete und Grenzen](docs/release.md)
+- [Anyka-Installation und SD-Karten](docs/installation.md)
+- [Anyka-Einstellungen und Dienste](docs/configuration.md)
+- [Fullhan SZ B22705: Oberfläche, Aufnahmen und ONVIF](docs/camera-sz-b22705.md)
 - [Original-Firmware sichern](docs/firmware-backup.md)
-- [LSC Smart PTZ 3007325.5: Einrichtung und bekannte Grenzen](docs/camera-3007325.5.md)
-- [Kompatibilität, integrierte Änderungen und offene Punkte](docs/integration.md)
-- [Selbst bauen und testen](docs/building.md)
-- [Release-Pakete und Veröffentlichung](docs/release.md)
+- [Selbst bauen, testen und veröffentlichen](docs/building.md)
 - [Changelog](CHANGELOG.md)
 
 ## Hilfe und Fehlerberichte
 
-Melden Sie Probleme im [Issue-Tracker dieses Forks](https://github.com/dev-zetta/LSCamoflash/issues). Nennen Sie Modell, genaue Firmware, Release-Version und die Schritte bis zum Fehler. Entfernen Sie Passwörter, WLAN-Zugangsdaten und Geräte- oder Kontokennungen aus beigefügten Logs.
-
-Weitere Hinweise finden Sie unter [Support](SUPPORT.md). Sicherheitsprobleme melden Sie bitte gemäß der [Sicherheitsrichtlinie](SECURITY.md).
+Melden Sie Probleme im [Issue-Tracker dieses Forks](https://github.com/dev-zetta/LSCamoflash/issues). Nennen Sie Modell, genaue Firmware, Release-Version und die Schritte bis zum Fehler. Entfernen Sie Passwörter, WLAN-Zugangsdaten und Geräte- oder Kontokennungen aus Logs. Weitere Hinweise stehen unter [Support](SUPPORT.md), Sicherheitsmeldungen in der [Sicherheitsrichtlinie](SECURITY.md).
 
 ## Lizenz und Herkunft
 
-LSCamoflash steht unter der [MIT-Lizenz](LICENSE). Enthaltene Komponenten haben eigene Lizenzen; siehe [Drittanbieter-Lizenzen](SOURCE/3RD_PARTY_LICENSES.md). Beachten Sie auch die [Nutzungsrichtlinie](SOURCE/USAGE_POLICY.md). Die Nutzung erfolgt ohne Gewährleistung; eine gesicherte Firmware ist kein Nachweis für eine funktionierende Wiederherstellung.
-
-Dieser Fork baut auf [Bunkerschild/LSCamoflash](https://github.com/Bunkerschild/LSCamoflash) und den Beiträgen seiner Mitwirkenden auf. Die Downloads und der Issue-Tracker oben gehören zu diesem Fork.
+Originaler Projektcode steht unter der [MIT-Lizenz](LICENSE). Enthaltene Komponenten behalten ihre [eigenen Lizenzen](SOURCE/3RD_PARTY_LICENSES.md). Dieser Fork baut auf [Bunkerschild/LSCamoflash](https://github.com/Bunkerschild/LSCamoflash) und den Beiträgen seiner Mitwirkenden auf. Die Nutzung erfolgt ohne Gewährleistung; eine geprüfte Firmware-Sicherung ist kein Nachweis für eine funktionierende Wiederherstellung.

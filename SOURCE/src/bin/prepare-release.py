@@ -13,12 +13,19 @@ import tarfile
 import tempfile
 
 REPO = Path(__file__).resolve().parents[3]
-VERSION_RE = re.compile(r"1\.[0-9]{2}\.[0-9]{4}\Z")
+VERSION_RE = re.compile(r"[1-9][0-9]*\.[0-9]{2}\.[0-9]{4}\Z")
 LFS_HEADER = b"version https://git-lfs.github.com/spec/v1\n"
 KIT_FILES = {"README.md", "verify-backup.py", "manifest.json", "SHA256SUMS",
              "card/hostapd", "card/busybox", "card/dump.sh", "card/_ht_ap_mode.conf",
              "card/_ht_get_log.conf", "card/SHA256SUMS"}
 VERSION_MEMBER = "mmcblk0p2/HACK/etc/version.txt"
+FULLHAN_SOURCE_FILES = {"start.sh", "stop.sh", "common.sh", "README.md", "onvif-start.sh",
+                        "onvif-stop.sh", "onvif-common.sh", "www/index.html", "www/dashboard.js",
+                        "www/dashboard.css", "www/cgi-bin/status.cgi", "www/cgi-bin/recordings.cgi"}
+FULLHAN_PAYLOAD_FILES = FULLHAN_SOURCE_FILES | {"bin/busybox", "bin/fullhan-recordings", "bin/fullhan-discovery",
+                                                "bin/onvif_srvd", "LICENSE.MIT", "COPYING.BusyBox", "COPYING.ONVIF"}
+FULLHAN_FILES = FULLHAN_PAYLOAD_FILES | {"manifest.json", "SHA256SUMS"}
+FULLHAN_STOCK_SHA = "ef9545b2f4fce419d71dadf7723a9cb010500c994a87a325a8c325b51648c8b2"
 
 
 def digest(path):
@@ -32,7 +39,7 @@ def digest(path):
 def version_text(data):
     value = data.decode("ascii").rstrip("\r\n")
     if not VERSION_RE.fullmatch(value):
-        raise ValueError("Version must have the form 1.xx.xxxx")
+        raise ValueError("Version must have the form N.xx.xxxx with a positive major and no leading zeros")
     return value
 
 
@@ -171,18 +178,18 @@ def archive_inventory(path):
     return inventory
 
 
-def verify_sums(directory, expected):
+def verify_sums(directory, expected, label="Backup kit"):
     entries = {}
     for line in regular(directory / "SHA256SUMS").read_text().splitlines():
         match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_./-]+)", line)
         if not match or match[2] in entries or ".." in PurePosixPath(match[2]).parts:
-            raise ValueError("Invalid backup-kit checksum list")
+            raise ValueError(f"Invalid {label} checksum list")
         entries[match[2]] = match[1]
     if set(entries) != expected:
-        raise ValueError("Backup-kit checksum inventory differs from expected files")
+        raise ValueError(f"{label} checksum inventory differs from expected files")
     for name, checksum in entries.items():
         if digest(regular(directory / name)) != checksum:
-            raise ValueError(f"Backup-kit checksum mismatch: {name}")
+            raise ValueError(f"{label} checksum mismatch: {name}")
 
 
 def validate_kit(kit):
@@ -200,6 +207,75 @@ def validate_kit(kit):
     for name in ("card/_ht_ap_mode.conf", "card/_ht_get_log.conf"):
         if (kit / name).stat().st_size:
             raise ValueError("Backup kit diagnostic markers must be empty")
+
+
+def binary_provenance(path, report):
+    if not isinstance(report, dict) or report.get("sha256") != digest(path) or report.get("bytes") != path.stat().st_size \
+            or report.get("static") is not True or report.get("cpu_arch") not in ("v5TE", "v5TEJ"):
+        raise ValueError(f"Fullhan binary provenance mismatch: {path.name}")
+
+
+def validate_fullhan(repo, inputs, busybox, copying):
+    kit = repo / "SOURCE/fullhan-kit/LSCamoflash-fullhan"
+    if any(path.is_symlink() for path in (kit, kit.parent, kit.parent.parent)):
+        raise ValueError("Fullhan kit must not use symlink directories")
+    expected = FULLHAN_FILES | {"bin", "www", "www/cgi-bin"}
+    actual = set()
+    for path in kit.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Fullhan kit must not contain symlinks")
+        actual.add(str(path.relative_to(kit)))
+    if actual != expected:
+        raise ValueError("Fullhan kit contains missing or unexpected files, including site credentials or logs")
+    for name in FULLHAN_FILES:
+        regular(kit / name)
+    verify_sums(kit, FULLHAN_FILES - {"SHA256SUMS"}, "Fullhan kit")
+    manifest = json.loads((kit / "manifest.json").read_text())
+    if manifest.get("format") != "lscamoflash-fullhan-management-v2" or manifest.get("stock_sha256") != FULLHAN_STOCK_SHA \
+            or manifest.get("credentials_provisioned") is not False or manifest.get("onvif_credentials_provisioned") is not False \
+            or manifest.get("onvif_included") is not True or manifest.get("arm1176_smoke") is not True:
+        raise ValueError("Fullhan release requires credential-free management with verified ONVIF")
+    files = manifest.get("files")
+    if not isinstance(files, dict) or set(files) != FULLHAN_PAYLOAD_FILES:
+        raise ValueError("Fullhan manifest inventory differs from expected public payload")
+    for name, checksum in files.items():
+        if checksum != digest(kit / name):
+            raise ValueError(f"Fullhan manifest checksum mismatch: {name}")
+    for name in FULLHAN_SOURCE_FILES:
+        if digest(regular(repo / "SOURCE/src/fullhan" / name)) != files[name]:
+            raise ValueError(f"Fullhan source differs from packaged payload: {name}")
+    if (kit / "LICENSE.MIT").read_bytes() != regular(repo / "LICENSE").read_bytes() \
+            or (kit / "COPYING.BusyBox").read_bytes() != copying:
+        raise ValueError("Fullhan project or BusyBox license differs from its source")
+    provenance = manifest.get("busybox_provenance", {})
+    if provenance != json.loads(regular(repo / "SOURCE/fullhan-busybox/manifest.json").read_text()) \
+            or provenance.get("format") != "lscamoflash-fullhan-busybox-v1" \
+            or provenance.get("cgi_range_header") is not True or provenance.get("arm1176_smoke") is not True \
+            or provenance.get("source_archive") != {"name": busybox + ".tar.bz2", "sha256": inputs[busybox + ".tar.bz2"]} \
+            or provenance.get("patch_sha256") != digest(regular(repo / "SOURCE/src/fullhan/busybox-http-range.patch")) \
+            or provenance.get("base_config_sha256") != digest(regular(repo / "SOURCE/src/patches" / busybox / "uclibc-config")):
+        raise ValueError("Fullhan BusyBox provenance differs from current build inputs")
+    binary_provenance(kit / "bin/busybox", manifest.get("busybox"))
+    binary_provenance(kit / "bin/busybox", provenance.get("elf"))
+    if provenance.get("sha256") != files["bin/busybox"]:
+        raise ValueError("Fullhan BusyBox provenance checksum mismatch")
+    for name in ("fullhan-recordings", "fullhan-discovery"):
+        binary_provenance(kit / "bin" / name, manifest.get("helpers", {}).get(name))
+    provenance = manifest.get("onvif_provenance", {})
+    if provenance != json.loads(regular(repo / "SOURCE/fullhan-onvif/manifest.json").read_text()) \
+            or provenance.get("format") != "lscamoflash-fullhan-onvif-v1" or provenance.get("arm1176_smoke") is not True \
+            or provenance.get("sha256") != files["bin/onvif_srvd"] \
+            or set(provenance.get("authentication", [])) != {"WSSE UsernameToken", "HTTP Digest"} \
+            or provenance.get("pre_auth_operations") != ["GetSystemDateAndTime"] \
+            or provenance.get("patch_sha256") != digest(regular(repo / "SOURCE/src/fullhan/onvif-readonly.patch")):
+        raise ValueError("Fullhan ONVIF provenance differs from current build inputs")
+    archives = provenance.get("source_archives")
+    if not isinstance(archives, dict) or not archives or any(inputs.get(name) != checksum for name, checksum in archives.items()):
+        raise ValueError("Fullhan ONVIF source archive provenance mismatch")
+    binary_provenance(kit / "bin/onvif_srvd", provenance.get("elf"))
+    if not (kit / "COPYING.ONVIF").stat().st_size or (kit / "COPYING.ONVIF").read_bytes() != regular(repo / "SOURCE/fullhan-onvif/COPYING.ONVIF").read_bytes():
+        raise ValueError("Fullhan ONVIF license differs from its build")
+    return kit
 
 
 def output_empty(output):
@@ -227,7 +303,7 @@ def notices(repo, version, source_name, inputs):
     summary = regular(repo / "SOURCE/3RD_PARTY_LICENSES.md").read_text()
     return f"""# LSCamoflash {version}: third-party notices
 
-The project-authored code is covered by LICENSE.MIT. The runtime and backup kit also contain independently licensed third-party software; this distribution as a whole is not licensed solely under MIT. COPYING.BusyBox contains the GPL version 2 text supplied with the exact BusyBox source input.
+The project-authored code is covered by LICENSE.MIT. The runtime, backup kit and separate Fullhan management kit also contain independently licensed third-party software; this distribution as a whole is not licensed solely under MIT. COPYING.BusyBox contains the GPL version 2 text supplied with the exact BusyBox source input. The Fullhan archive additionally includes COPYING.ONVIF for its isolated static ONVIF server, gSOAP authentication code with its OpenSSL linking exception, OpenSSL, zlib and toolchain runtime components; retain these component notices. It contains no HTTP/ONVIF credentials or site UUID; provision those privately before manual startup.
 
 The accompanying `{source_name}` contains the Git-tracked public repository files, including build recipes, patches, configurations and project notices, plus every hydrated input explicitly listed by SOURCE/Makefile URLS. Untracked working directories, private research and undeclared download files are excluded. Source archives retain their upstream license texts. FFmpeg is built with --enable-gpl and --enable-version3, giving this build GPL version 3 or later licensing.
 
@@ -250,6 +326,7 @@ def prepare(repo, output):
     update_name = f"update-{version}-uclibc.tgz"
     source_name = f"LSCamoflash-{version}-source.tar.gz"
     kit_name = f"LSCamoflash-{version}-backup-kit.tar.gz"
+    fullhan_name = f"LSCamoflash-{version}-fullhan.tar.gz"
     full, update = repo / "SOURCE" / full_name, repo / "SOURCE" / update_name
     full_members, update_members = archive_inventory(full), archive_inventory(update)
     full_version = full_members.get(VERSION_MEMBER)
@@ -265,6 +342,7 @@ def prepare(repo, output):
     if busybox + ".tar.bz2" not in inputs:
         raise ValueError("BusyBox source archive is not a declared URLS input")
     copying = busybox_license(repo, busybox)
+    fullhan = validate_fullhan(repo, inputs, busybox, copying)
     project_license = regular(repo / "SOURCE/LICENSE.MIT")
     notice_text = notices(repo, version, source_name, inputs)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -288,6 +366,10 @@ def prepare(repo, output):
                 add_file(archive, kit / relative, prefix + "/" + relative)
             for relative in ("LICENSE.MIT", "COPYING.BusyBox", "THIRD_PARTY_NOTICES.md"):
                 add_file(archive, stage / relative, prefix + "/" + relative)
+        with tarfile.open(stage / fullhan_name, "w:gz", dereference=False) as archive:
+            # Runtime paths intentionally use this fixed installation folder.
+            for relative in sorted(FULLHAN_FILES):
+                add_file(archive, fullhan / relative, "LSCamoflash-fullhan/" + relative)
         assets = sorted(path.name for path in stage.iterdir())
         (stage / "SHA256SUMS").write_text("".join(f"{digest(stage / name)}  {name}\n" for name in assets))
         output_empty(output)

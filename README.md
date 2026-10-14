@@ -1,59 +1,66 @@
 # LSCamoflash
 
-Give compatible LSC / Tuya Anyka cameras a local web interface, RTSP streaming and more control over their settings. LSCamoflash runs an extension from a microSD card; available features depend on the camera's exact stock firmware.
+Local camera tools for compatible LSC / Tuya cameras: a web interface, RTSP integration and firmware backup utilities running from a microSD card. **Anyka and Fullhan cameras use separate packages**, with features determined by their exact stock firmware.
 
 [![Release](https://img.shields.io/github/v/release/dev-zetta/LSCamoflash)](https://github.com/dev-zetta/LSCamoflash/releases/latest)
 [![Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**[Download the latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest)** · **[Setup guide](docs/installation.md)** · **[Documentation](docs/index.md)** · [Deutsch](README_DE.md)
+**[Download v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000)** · **[Setup guide](docs/installation.md)** · **[Documentation](docs/index.md)** · [Deutsch](README_DE.md)
 
 ## What you can do
 
 - Watch supported cameras through local RTSP and connect an ONVIF client.
-- Use a browser to view system status, change settings and restart the camera.
-- Configure Wi-Fi and optional services through files on the SD card.
-- Back up stock firmware with the separate, documented NOR backup kit.
+- View camera status, CPU, memory and SD information in a browser.
+- Browse and download finalized recordings with the experimental Fullhan interface.
+- Change settings and configure Wi-Fi/services on supported Anyka profiles.
+- Back up stock firmware with the separate, documented NOR tools.
 
-Streaming, audio and motor control vary by firmware. Check compatibility before preparing a card.
+Streaming, audio, motor control and startup differ between platforms. Check the guide for your exact camera before preparing a card.
 
-## Is my camera supported?
+## Choose the package for your camera
 
-The **LSC Smart PTZ Camera, SI L25502 / article 3007325.5**, has been tested with stock firmware **6.2863.125.1348**, displayed in the app as V1.0.0 (6.2863.125). Verified functions include firmware backup, Wi-Fi, web UI login, H.265 main video, H.264 sub video and microphone audio. Manual ONVIF connection selects the H.264 substream.
+| Tested camera | Download from v2.00.0000 | Setup |
+| --- | --- | --- |
+| **Anyka LSC Smart PTZ**, SI L25502 / article 3007325.5, firmware `6.2863.125.1348` | `LSCamoflash-2.00.0000-uclibc.tar.gz` | [3007325.5 guide](docs/camera-3007325.5.md) |
+| **Fullhan LSC Indoor 1080p**, SZ B22705 / FH8626V100, firmware `7.6.23` | `LSCamoflash-2.00.0000-fullhan.tar.gz` | [Fullhan guide](docs/camera-sz-b22705.md) |
+| **Firmware backup only** | `LSCamoflash-2.00.0000-backup-kit.tar.gz` | [Anyka SD backup](docs/firmware-backup.md) or [Fullhan manual collector](docs/camera-sz-b22705.md#manual-backup-through-the-stock-shell) |
 
-For this camera, local streaming mode replaces Tuya app operation and needs explicit Wi-Fi settings. Automatic ONVIF discovery is not bundled, toolkit PTZ control is disabled, and long-term stability remains unverified. Follow the [camera guide](docs/camera-3007325.5.md) for the exact firmware identity and setup.
+Download `SHA256SUMS` too and verify your chosen archive. The Anyka update package is for an existing Anyka runtime; it does not install or update the Fullhan interface. The backup kit’s SD boot launcher applies to supported Anyka cameras, while Fullhan uses its separate manual entry.
 
-Other Anyka camera profiles are inherited from upstream, including IPC-XC-C323 support. Their evidence and remaining checks are listed in the [compatibility and integration notes](docs/integration.md). A matching product name alone does not establish compatibility.
+**Anyka 3007325.5:** verified functions include Wi-Fi, web UI login, H.265 main video, H.264 sub video and PCMA microphone audio. Manual ONVIF selects the H.264 substream. Local streaming replaces Tuya app operation and requires explicit Wi-Fi settings; automatic ONVIF discovery and toolkit PTZ are unavailable on this profile.
 
-The [Fullhan SZ B22705 / firmware 7.6.23 guide](docs/camera-sz-b22705.md) covers verified stock RTSP, firmware backup and a separate experimental management interface built from current source, with recording downloads and optional authenticated ONVIF. The dashboard starts manually and keeps the stock camera application running. This platform requires its own package; the Anyka package above must not be installed on it.
+**Fullhan SZ B22705:** the experimental interface provides Dashboard, Recordings, Streams and Diagnostics tabs while keeping the stock application running. Short live checks verified authenticated recording HEAD/Range downloads, native H.264 profiles and independent ONVIF clients. It requires private credentials and a manual start after reboot. Add ONVIF at port 5000 manually; stock discovery stays untouched. Camera settings, PTZ, audio forwarding and automatic startup are not implemented.
+
+Other Anyka profiles are inherited from upstream, including IPC-XC-C323 support. See the [compatibility and integration notes](docs/integration.md). A matching product name alone does not establish compatibility, and short live checks do not establish long-term stability.
 
 ## Get started
 
-1. **Check your camera and firmware.** Read the [compatibility notes](docs/integration.md) and any guide for your model.
-2. **Make a backup.** Save existing SD recordings and follow the [stock firmware backup guide](docs/firmware-backup.md) where supported. Keep firmware dumps and credentials private.
-3. **Download the full runtime package** from the [fork's releases](https://github.com/dev-zetta/LSCamoflash/releases/latest). Choose `LSCamoflash-<version>-uclibc.tar.gz` and `SHA256SUMS` for a new installation.
-4. **Prepare the SD card and boot the camera** using the [installation guide](docs/installation.md). It covers both card layouts and first startup.
-5. **Open `http://<camera-ip>:8080/`.** A fresh web UI uses `admin` / `admin`; change it through the **Password** page. See [configuration and everyday use](docs/configuration.md).
+1. **Check your camera and firmware.** Choose its platform-specific guide above.
+2. **Make a backup.** Save existing SD recordings and follow the applicable firmware backup procedure. Keep dumps and credentials private.
+3. **Download and verify the matching package.** Use [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) and `SHA256SUMS`.
+4. **Prepare the card using your camera guide.** The [Anyka installation guide](docs/installation.md) covers its layouts and installers. The [Fullhan setup](docs/camera-sz-b22705.md#prepare-the-private-payload) uses its own named folder, private credentials and manual startup.
+5. **Open `http://<camera-ip>:8080/`.** A fresh **Anyka** web UI uses `admin` / `admin`; change it through **Password**. **Fullhan has no default password** and uses the account you provisioned. Its independent ONVIF account is separate.
 
-The release also contains an update package for existing installations and a separate backup kit. The installation guide explains which one to use. You can install a published package without compiling the project.
+Published packages need no compilation. Fullhan still requires local credential provisioning; neither copying its public archive nor rebooting the camera starts the services automatically.
 
-Use a spare card and back up before changing it: the partitioning scripts erase the selected disk. Stock startup can change persistent camera configuration, so removing the SD card does not guarantee a complete rollback. Use the software only on devices you own or may modify; see the [usage policy](USAGE_POLICY.md).
+Use a spare card and back up before changing it: the Anyka partitioning scripts erase the selected disk. Stock startup can change persistent camera configuration, so removing an SD card does not guarantee complete rollback. Use the software only on devices you own or may modify; see the [usage policy](USAGE_POLICY.md).
 
 ## Guides
 
 | I want to… | Read this |
 | --- | --- |
-| Install a release | [Installation](docs/installation.md) |
-| Set passwords, services or streaming | [Configuration and everyday use](docs/configuration.md) |
+| Choose a release or install Anyka | [Release notes](docs/release.md) and [installation](docs/installation.md) |
+| Set Anyka passwords, services or streaming | [Configuration and everyday use](docs/configuration.md) |
+| Set up Fullhan management and recordings | [Fullhan SZ B22705 guide](docs/camera-sz-b22705.md) |
 | Back up the original firmware | [Firmware backup](docs/firmware-backup.md) |
-| Set up the tested 3007325.5 camera | [Camera guide](docs/camera-3007325.5.md) |
 | Troubleshoot startup or playback | [Troubleshooting](docs/troubleshooting.md) |
-| Build or test the project | [Building and testing](docs/building.md) |
-| See what changed | [Changelog](CHANGELOG.md) and [release notes](docs/release.md) |
+| Build, test or publish the project | [Building and testing](docs/building.md) |
+| See what changed | [Changelog](CHANGELOG.md) |
 
 ## Get help or contribute
 
-Report bugs and compatibility results in this fork's [issue tracker](https://github.com/dev-zetta/LSCamoflash/issues). Include the camera model, exact firmware, LSCamoflash version and steps to reproduce; redact credentials and device identifiers from logs. Read the [support guide](SUPPORT.md) or [contributing guide](CONTRIBUTING.md) for more details. Report vulnerabilities through the [security policy](SECURITY.md).
+Report bugs and compatibility results in this fork’s [issue tracker](https://github.com/dev-zetta/LSCamoflash/issues). Include the camera model, exact firmware, LSCamoflash version and steps to reproduce; redact credentials and device identifiers from logs. Read the [support guide](SUPPORT.md) or [contributing guide](CONTRIBUTING.md). Report vulnerabilities through the [security policy](SECURITY.md).
 
 ## Credits and licenses
 

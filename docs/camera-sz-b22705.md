@@ -119,7 +119,74 @@ The expanded interface, recording endpoints and direct ONVIF service passed the 
 
 ### Prepare the private payload
 
-Complete and verify an independent firmware backup first. Follow [Build the separate Fullhan pilot](building.md#build-the-separate-fullhan-pilot) to build the dedicated `LSCamoflash-fullhan/` folder. The normal credential-free build cannot start: **authentication is mandatory, and there is no default dashboard password**.
+Complete and verify an independent firmware backup first. Download **`LSCamoflash-2.00.0000-fullhan.tar.gz`** and `SHA256SUMS` from [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000), verify the archive, and extract it into private host storage. It contains the required top-level **`LSCamoflash-fullhan/`** folder, static ONVIF, helpers, notices and payload checksums. Check the extracted public files with `sha256sum -c SHA256SUMS` from inside that folder.
+
+The public archive contains no `httpd.conf`, `onvif.auth` or `onvif.uuid`. **Authentication is mandatory, and there is no default dashboard password.** Provision private credentials on the host before copying the folder to the camera. Published binaries require no compilation; a source build remains available through [Building and testing](building.md#build-the-separate-fullhan-pilot).
+
+#### Provision downloaded credentials
+
+Use host Python 3 and OpenSSL from a terminal. In the example below, replace the folder path with your freshly extracted private folder. It prompts for two independent passwords without echoing them, requires 1–128 printable ASCII characters, and refuses existing credential/UUID files, including symlinks. No password is passed in a command argument. Save the example outside the payload folder if you prefer running it as a file.
+
+```python
+from pathlib import Path
+import getpass
+import os
+import re
+import subprocess
+import uuid
+
+folder = Path("/absolute/private/path/LSCamoflash-fullhan")
+if folder.name != "LSCamoflash-fullhan" or folder.is_symlink() or not folder.is_dir():
+    raise SystemExit("Choose the freshly extracted LSCamoflash-fullhan directory")
+paths = [folder / name for name in ("httpd.conf", "onvif.auth", "onvif.uuid")]
+if any(os.path.lexists(path) for path in paths):
+    raise SystemExit("Existing site credentials or UUID must be preserved")
+
+def password(label):
+    value = getpass.getpass(label + ": ")
+    confirmation = getpass.getpass("Confirm " + label + ": ")
+    if value != confirmation or not 1 <= len(value) <= 128 or any(not 32 <= ord(c) <= 126 for c in value):
+        raise SystemExit("Use matching, nonempty printable ASCII passwords of at most 128 characters")
+    return value
+
+web = password("Dashboard password")
+onvif = password("Independent ONVIF password")
+if web == onvif:
+    raise SystemExit("Choose different dashboard and ONVIF passwords")
+result = subprocess.run(["openssl", "passwd", "-1", "-stdin"],
+                        input=(web + "\n").encode("ascii"), capture_output=True, check=True, timeout=10)
+hashed = result.stdout.decode("ascii").strip()
+if not re.fullmatch(r"\$1\$[A-Za-z0-9./]{1,8}\$[A-Za-z0-9./]{22}", hashed):
+    raise SystemExit("OpenSSL did not return the expected salted password hash")
+contents = ["I:index.html\n/:admin:" + hashed + "\n", "admin\n" + onvif + "\n", str(uuid.uuid4()) + "\n"]
+created = []
+old_mask = os.umask(0o077)
+try:
+    for path, content in zip(paths, contents):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        identity = os.fstat(fd)
+        created.append((path, identity.st_dev, identity.st_ino))
+        with os.fdopen(fd, "w", encoding="ascii", newline="\n") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+except BaseException:
+    for path, device, inode in reversed(created):
+        try:
+            current = path.lstat()
+            if (current.st_dev, current.st_ino) == (device, inode):
+                path.unlink()
+        except FileNotFoundError:
+            pass
+    raise
+finally:
+    os.umask(old_mask)
+print("Private credentials created for username admin. Keep this folder private.")
+```
+
+The resulting web password is stored only as a salted MD5-crypt hash in `httpd.conf`; ONVIF needs its own two-line plaintext `onvif.auth` for its authentication protocols. `onvif.uuid` gives the service a private endpoint identity. All three stay at the payload root outside `www/` and are intentionally absent from public checksums. Preserve them across replacements instead of regenerating credentials or endpoint identity. The example only writes local host files and does not contact a camera.
+
+For a private source build instead of downloaded binaries, use the builder options below.
 
 Use the builder's `--password-file` option with a private host file containing one password line. The username defaults to `admin` and can be changed with `--username`. The builder produces `httpd.conf` with a salted MD5-crypt password hash; it does not store the plaintext password in the payload. Keep both the host password file and generated private payload out of the repository and public artifacts. The strict runtime configuration accepts one hashed account and rejects plaintext passwords or arbitrary HTTP/interpreter directives.
 

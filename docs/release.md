@@ -1,5 +1,29 @@
 # LSCamoflash releases
 
+## Version 2.00.0000 - 2026-10-14
+
+This major release adds a separate experimental Fullhan management package alongside the Anyka runtime. Download the platform-specific archives, `SHA256SUMS` and notices from [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000). The project retains its custom `major.minor.revision` format. See the [2.00.0000 changelog](https://github.com/dev-zetta/LSCamoflash/blob/v2.00.0000/CHANGELOG.md) for changes.
+
+| Release asset | Intended use |
+| --- | --- |
+| `LSCamoflash-2.00.0000-uclibc.tar.gz` | Full **Anyka** runtime, generated card files and installers. |
+| `update-2.00.0000-uclibc.tgz` | Existing **Anyka** runtime update, excluding `HACK/etc/` and the local root crontab. |
+| `LSCamoflash-2.00.0000-fullhan.tar.gz` | Separate experimental **Fullhan SZ B22705 / 7.6.23** management folder with static ONVIF; credential-free and manually started. |
+| `LSCamoflash-2.00.0000-backup-kit.tar.gz` | Separate stock NOR backup tools; its SD boot launcher applies to supported Anyka cameras. Fullhan uses the generic collector through its stock shell. |
+| `LSCamoflash-2.00.0000-source.tar.gz` | Public source and declared build inputs; not a camera installation. |
+| `SHA256SUMS` | Hashes for the other eight release files. |
+| `THIRD_PARTY_NOTICES.md`, `LICENSE.MIT`, `COPYING.BusyBox` | Component/source notices and license texts; the Fullhan archive also retains its ONVIF notices. |
+
+For **Anyka 3007325.5 / firmware 6.2863.125.1348**, follow [Installation](installation.md) and the [camera guide](camera-3007325.5.md). Its verified local H.265 main/H.264 sub streams include PCMA audio, and manual ONVIF selects the H.264 substream. Local streaming replaces Tuya app operation and requires explicit Wi-Fi settings; toolkit PTZ and automatic discovery remain unavailable on this exact profile.
+
+For **Fullhan SZ B22705 / FH8626V100 / firmware 7.6.23**, follow the [separate guide](camera-sz-b22705.md#prepare-the-private-payload). The archive contains `LSCamoflash-fullhan/`, whose name and placement at `/mnt/LSCamoflash-fullhan/` must be preserved. It contains no `httpd.conf`, `onvif.auth` or `onvif.uuid`: provision private credentials before starting. Do not run Anyka installers or install their `hostapd` boot hooks on this platform.
+
+Fullhan short live checks verified authenticated status and recording HEAD/Range, WSSE and HTTP Digest ONVIF, native H.264 main/sub profiles, standard-client stream URIs and independent stop/restart without replacing the stock application. Start HTTP manually after each reboot; optional ONVIF additionally uses `onvif-start.sh --no-discovery` and a manually added port-5000 address. Stock UDP 3702 discovery stays untouched. Only the read-only ONVIF clock query is anonymous for WSSE synchronization; protected Device/Media data requires authentication.
+
+Fullhan camera controls, PTZ, microphone forwarding and automatic startup are not implemented. Neither profile’s short checks establish long-term or multiple-client stability, every stock-app/recording function, atomic firmware capture or successful restore. Published packages contain no proprietary firmware, device credentials, private logs or actual firmware backups. The backup kit is separate from both runtime packages and is not a recovery image.
+
+The publication procedure is [Building and testing → Publish a GitHub release](building.md#publish-a-github-release). The workflow publishes checksummed assets from the successful CI build for the exact release commit.
+
 ## Fork 1.03.2413 - 2026-10-13
 
 This is the first release of the `dev-zetta/LSCamoflash` fork. Download packages, checksums and source from the [v1.03.2413 release page](https://github.com/dev-zetta/LSCamoflash/releases/tag/v1.03.2413). Read the [changelog](https://github.com/dev-zetta/LSCamoflash/blob/v1.03.2413/CHANGELOG.md) for the complete change summary.

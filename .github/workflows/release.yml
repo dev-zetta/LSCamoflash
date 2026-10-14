@@ -47,6 +47,7 @@ jobs:
               (run['path'] == '.github/workflows/makefile.yml', 'Expected Build-Test workflow'),
               (run['status'] == 'completed' and run['conclusion'] == 'success', 'Build did not pass'),
               (run['event'] in ('push', 'workflow_dispatch'), 'Release requires a trusted branch build'),
+              (run['head_branch'] == 'main', 'Release requires validation from main'),
           )
           for valid, message in checks:
               if not valid:
@@ -57,6 +58,30 @@ jobs:
         run: |
           set -euo pipefail
           gh run download "$BUILD_RUN_ID" --name "LSCamoflash-release-$GITHUB_SHA" --dir release
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          version = Path('SOURCE/version.txt').read_text().rstrip('\r\n')
+          if not re.fullmatch(r'[1-9][0-9]*\.[0-9]{2}\.[0-9]{4}', version):
+              raise SystemExit('Invalid release version')
+          expected = {
+              f'LSCamoflash-{version}-uclibc.tar.gz', f'update-{version}-uclibc.tgz',
+              f'LSCamoflash-{version}-backup-kit.tar.gz', f'LSCamoflash-{version}-source.tar.gz',
+              f'LSCamoflash-{version}-fullhan.tar.gz', 'LICENSE.MIT', 'COPYING.BusyBox',
+              'THIRD_PARTY_NOTICES.md', 'SHA256SUMS',
+          }
+          assets = list(Path('release').iterdir())
+          if {path.name for path in assets} != expected or any(path.is_symlink() or not path.is_file() for path in assets):
+              raise SystemExit('Expected exactly nine public release assets')
+          entries = {}
+          for line in Path('release/SHA256SUMS').read_text().splitlines():
+              match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9._-]+)', line)
+              if not match or match[2] in entries:
+                  raise SystemExit('Invalid release checksum inventory')
+              entries[match[2]] = match[1]
+          if set(entries) != expected - {'SHA256SUMS'}:
+              raise SystemExit('Release checksum inventory is incomplete')
+          PY
           cd release
           sha256sum --strict --check SHA256SUMS
       - name: Publish the version and changelog
@@ -64,8 +89,23 @@ jobs:
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < SOURCE/version.txt)"
-          [[ "$version" =~ ^1\.[0-9]{2}\.[0-9]{4}$ ]]
-          grep -F "## [$version]" CHANGELOG.md
+          [[ "$version" =~ ^[1-9][0-9]*\.[0-9]{2}\.[0-9]{4}$ ]]
+          VERSION="$version" python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          lines = Path('CHANGELOG.md').read_text().splitlines(keepends=True)
+          headings = [(index, re.match(r'^## \[([^]]+)\](?:\s.*)?$', line.rstrip('\r\n'))) for index, line in enumerate(lines)]
+          headings = [(index, match[1]) for index, match in headings if match]
+          current = [index for index, value in headings if value == os.environ['VERSION']]
+          if len(current) != 1:
+              raise SystemExit('Expected exactly one current changelog section')
+          start = current[0]
+          end = next((index for index, _ in headings if index > start), len(lines))
+          notes = ''.join(lines[start + 1:end]).strip()
+          if not notes:
+              raise SystemExit('Current release notes are empty')
+          Path('release-notes.md').write_text(notes + '\n')
+          PY
           gh api "repos/$GH_REPO/git/matching-refs/tags/v$version" > tag-refs.json
           VERSION="$version" python3 - <<'PY'
           import json, os
@@ -76,5 +116,30 @@ jobs:
           gh release create "v$version" release/* \
             --target "$GITHUB_SHA" \
             --title "LSCamoflash $version" \
-            --notes-file CHANGELOG.md \
-            --latest
+            --notes-file release-notes.md \
+            --draft
+          draft_api="$(gh release view "v$version" --json apiUrl --jq .apiUrl)"
+          release_id="${draft_api##*/}"
+          [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$draft_api" == "${GITHUB_API_URL:-https://api.github.com}/repos/$GH_REPO/releases/$release_id" ]]
+          gh api "repos/$GH_REPO/releases/$release_id" > draft-release.json
+          VERSION="$version" python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          draft = json.loads(Path('draft-release.json').read_text())
+          expected = {path.name for path in Path('release').iterdir()}
+          assets = draft['assets']
+          if draft['tag_name'] != 'v' + os.environ['VERSION'] or draft['target_commitish'] != os.environ['GITHUB_SHA'] or draft['draft'] is not True or draft['prerelease'] is not False:
+              raise SystemExit('Draft release version or target differs from validated build')
+          if len(assets) != len(expected) or {asset['name'] for asset in assets} != expected or any(asset['state'] != 'uploaded' for asset in assets):
+              raise SystemExit('Draft release assets differ from validated inventory')
+          for asset in assets:
+              path = Path('release') / asset['name']
+              checksum = hashlib.sha256()
+              with path.open('rb') as source:
+                  for block in iter(lambda: source.read(1024 * 1024), b''):
+                      checksum.update(block)
+              if asset['size'] != path.stat().st_size or asset.get('digest') != 'sha256:' + checksum.hexdigest():
+                  raise SystemExit('Draft release asset digest or size differs from validated bytes: ' + asset['name'])
+          PY
+          gh release edit "v$version" --draft=false --latest

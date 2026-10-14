@@ -4,14 +4,14 @@ layout: default
 
 # LSCamoflash documentation
 
-Start with a published package from the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest). For a new installation, choose the full `LSCamoflash-<version>-uclibc.tar.gz` runtime archive and `SHA256SUMS`. The GitHub source ZIP is for development and is not ready to copy to a camera.
+Start with [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) and `SHA256SUMS`. **Anyka** cameras use `LSCamoflash-2.00.0000-uclibc.tar.gz`; the tested **Fullhan SZ B22705 / 7.6.23** uses the separate `LSCamoflash-2.00.0000-fullhan.tar.gz`. Its public folder needs private credentials and manual startup. The GitHub source ZIP is for development and is not ready to copy to a camera.
 
 ## Set up your camera
 
 1. Check the [compatibility and integration notes](integration.md) and your exact firmware revision.
 2. Follow the [firmware backup guide](firmware-backup.md) before runtime installation where supported.
-3. Use the [installation guide](installation.md) to choose a card layout and complete the first boot.
-4. Read [configuration and everyday use](configuration.md) for passwords, services and streaming.
+3. For Anyka, use the [installation guide](installation.md) and [configuration guide](configuration.md).
+4. For Fullhan, follow its [download and private setup](camera-sz-b22705.md#prepare-the-private-payload); do not use the Anyka installers.
 
 The [LSC Smart PTZ 3007325.5 / SI L25502 guide](camera-3007325.5.md) covers firmware 6.2863.125.1348. Backup, Wi-Fi, web UI access, local H.265/H.264 video and PCMA microphone audio have been verified on that camera. ONVIF works through manual connection to its H.264 substream. Local mode replaces Tuya app operation; automatic discovery and toolkit PTZ are unavailable for this profile, and long-term stability remains unverified.
 
@@ -24,7 +24,7 @@ The [LSC Smart PTZ 3007325.5 / SI L25502 guide](camera-3007325.5.md) covers firm
 | [Troubleshooting](troubleshooting.md) | Offline camera, playback problems and useful logs. |
 | [Firmware backup](firmware-backup.md) | Separate NOR backup kit and host verification. |
 | [3007325.5 camera](camera-3007325.5.md) | Exact firmware identity, local mode, diagnostics and device evidence. |
-| [Fullhan SZ B22705 camera](camera-sz-b22705.md) | Stock RTSP, verified manual NOR backup and a separate experimental status dashboard. |
+| [Fullhan SZ B22705 camera](camera-sz-b22705.md) | Separate experimental management, recording downloads, authenticated ONVIF, manual startup and verified NOR backup. |
 | [Building and testing](building.md) | Linux dependencies, cross-compilation, verification and regression tests. |
 | [Integration and compatibility](integration.md) | Upstream PRs, issue disposition and historical validation. |
 | [Release notes](release.md) | Published packages and release limitations. |
