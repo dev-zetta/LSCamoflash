@@ -14,6 +14,8 @@ The project license applies to project-authored code. Third-party components kee
 
 `SOURCE/src/bin/prepare-release.py --output release` stages the versioned full and update archives, a separate backup-kit archive, LICENSE.MIT, COPYING.BusyBox, THIRD_PARTY_NOTICES.md, SHA256SUMS and a public source bundle. The source bundle contains Git-tracked public files, including build scripts, configurations and patches, plus all hydrated archives and other inputs declared in SOURCE/Makefile URLS. Private research, untracked extracted files and undeclared downloads are excluded. Each upstream source archive retains its license texts.
 
+The separate experimental Fullhan pilot contains project-authored scripts and a static BusyBox, with LICENSE.MIT and COPYING.BusyBox included in its own output. Its BusyBox source, configuration and patches use the same declared inputs as the default build. Site-owned authentication and proprietary Fullhan firmware are excluded from public packages.
+
 ## Toolchains
 
 The Bootlin 2020.08-1 uClibc, glibc and musl toolchains contain components under several licenses, rather than one GPLv2 license. The uClibc toolchain README.txt identifies, among others, GPLv3+ binutils, LGPL-2.1+ uClibc-ng, GPLv2 Linux headers, and differently licensed host tools. GCC and its runtime libraries also carry component-specific terms and runtime exceptions; consult their original notices.

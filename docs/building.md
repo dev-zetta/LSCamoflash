@@ -57,6 +57,25 @@ For the runtime alone, use `make -C SOURCE all`. Add `release`, `update` or `bac
 
 Use the [firmware backup guide](firmware-backup.md) for the kit's staging procedure. Its boot markers must stay separate from a runtime installation. A completed build does not select the correct card layout or firmware profile for your camera.
 
+## Build the separate Fullhan pilot
+
+The [SZ B22705 / firmware 7.6.23 pilot](camera-sz-b22705.md) is a small, manually started status dashboard for the stock Fullhan application. It has its own package and does not use the Anyka runtime, installer or SD bootstrap. Build a credential-free payload with an ARM1176 emulation check:
+
+```sh
+QEMU_ARM=/usr/bin/qemu-arm make -C SOURCE fullhan-kit
+```
+
+The output is `SOURCE/fullhan-kit/LSCamoflash-fullhan/`. The builder refuses a nonempty destination, so preserve any site-owned authentication before preparing a replacement output. The default payload cannot start until credentials are provisioned. To build a separate private copy, create a private file containing one password line and run:
+
+```sh
+python3 tools/fullhan/build-kit.py \
+  --qemu /usr/bin/qemu-arm \
+  --password-file /absolute/private/path/password.txt \
+  --output /absolute/private/path/LSCamoflash-fullhan
+```
+
+Host OpenSSL is required for `--password-file`; the username defaults to `admin` and can be changed with `--username`. The plaintext password is passed to OpenSSL through stdin. The resulting `httpd.conf` contains a salted password hash and must stay private. The builder checks the static ARM ELF, includes license notices and records payload checksums; `--qemu` also verifies the required BusyBox applets under ARM1176. Neither command installs files on a camera. Follow the camera guide for SD placement, manual startup and acceptance limits. CI builds this credential-free pilot as its own experimental artifact; it is separate from the eight stable release assets.
+
 ## Verify the generated runtime
 
 After generating both runtime archives, run:
@@ -100,7 +119,7 @@ python3 -m unittest discover -s tests -p 'test_firmware_backup*.py' -v
 
 ## Rebuild after changes
 
-Runtime templates live under `SOURCE/src/sdcard/`, native helpers under `SOURCE/src/contrib/`, and third-party build patches under `SOURCE/src/patches/`. Generated packages, toolchains, staging files and card contents are kept separately under `SOURCE/`.
+Runtime templates live under `SOURCE/src/sdcard/`, the isolated Fullhan pilot under `SOURCE/src/fullhan/`, native helpers under `SOURCE/src/contrib/`, and third-party build patches under `SOURCE/src/patches/`. Generated packages, toolchains, staging files and card contents are kept separately under `SOURCE/`.
 
 For a clean rebuild after changing package configuration or patches:
 

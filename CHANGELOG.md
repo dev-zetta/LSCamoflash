@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Features
+
+- Add a separate experimental Fullhan FH8626V100 / SZ B22705 firmware 7.6.23 status dashboard with mandatory authentication, available RAM reporting and stock RTSP links. Its SD-only package has exact firmware guards, manual startup and owned-process shutdown; it keeps the stock application running. Camera controls, audio, ONVIF and automatic startup are outside this pilot.
+- Build and upload the credential-free Fullhan pilot separately in CI, including an ARM1176 compatibility check. Private site authentication is never included in the public payload.
+
 ### Fixes
 
 - Keep NOR firmware collection running when an optional process disappears during `/proc` inspection, and discard incomplete optional map snapshots. Required flash metadata and paired-read verification remain strict.

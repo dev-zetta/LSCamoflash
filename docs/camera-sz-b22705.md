@@ -1,6 +1,6 @@
-# LSC Indoor 1080p SZ B22705: Fullhan investigation
+# LSC Indoor 1080p SZ B22705: experimental Fullhan support
 
-This camera already provides local RTSP video through its stock firmware. Its hardware and diagnostic shell were identified on **2026-10-14**, but a complete LSCamoflash runtime for this Fullhan platform has not been implemented. Use the stock stream addresses below; do not install the Anyka runtime package or reuse the [3007325.5 camera profile](camera-3007325.5.md).
+This camera already provides local RTSP video through its stock firmware. Its hardware, diagnostic shell and software backup were verified on **2026-10-14**. A separate, manually started Fullhan status dashboard passed live authentication, startup/shutdown and stock-stream coexistence checks on that date. It is not a complete camera-management runtime. Use the stock stream addresses below; do not install the Anyka runtime package or reuse the [3007325.5 camera profile](camera-3007325.5.md).
 
 The observations apply to the tested **SZ B22705 running firmware 7.6.23**. Other cameras sold as “LSC Indoor 1080p” can use different hardware and firmware, including a later Anyka platform.
 
@@ -13,7 +13,8 @@ The observations apply to the tested **SZ B22705 running firmware 7.6.23**. Othe
 | Hardware and flash identification | CPU, kernel, libc, application identity, mounts and six NOR partitions inspected through the stock shell. |
 | Firmware backup | All six exposed NOR partitions collected with paired matching reads; the private host copy passed verification of 109 checksummed files. Physical SD remount and restoration remain untested. |
 | RTSP audio | Neither tested stream advertised an audio track. Microphone hardware and other audio paths have not been tested. |
-| LSCamoflash web UI, ONVIF and automatic SD startup | No Fullhan implementation or device acceptance established. |
+| Fullhan status dashboard | Authenticated page/API verified live; owned shutdown/restart preserved the original stock application and both RTSP streams. |
+| Camera settings, ONVIF and automatic SD startup | Not implemented for this Fullhan profile. |
 
 Stock RTSP operation does not establish independence from Tuya services, successful operation with internet access blocked, or long-term stability. Those remain separate tests.
 
@@ -107,11 +108,65 @@ Before collection, confirm the exact application/hardware identity, the live NOR
 
 Keep the complete run directory and its metadata together when transferring it to the host, then run the [host verifier](../tools/firmware-backup/verify-backup.py). Check its exit status and `verified: true` result before treating the copy as a verified backup. Preserve failed attempts for diagnosis, and keep the additional checked file/directory flush and physical remount limits above separate from host checksum verification. Preparing the runtime or modifying startup files is unnecessary for this software backup path.
 
+## Experimental Fullhan status dashboard
+
+This isolated pilot displays the model, firmware, current LAN address, uptime, available RAM and stock RTSP links. It uses its own static BusyBox HTTP server and provides no camera settings, PTZ, reboot, firmware update or recording-deletion controls. The stock `dgiot` application continues to own the camera and its network configuration. The live checks below cover this exact firmware and the bounded manual pilot; browser/user acceptance and long-term operation remain separate.
+
+### Prepare the private payload
+
+Complete and verify an independent firmware backup first. Follow [Build the separate Fullhan pilot](building.md#build-the-separate-fullhan-pilot) to build the dedicated `LSCamoflash-fullhan/` folder. The normal credential-free build cannot start: **authentication is mandatory, and there is no default dashboard password**.
+
+Use the builder's `--password-file` option with a private host file containing one password line. The username defaults to `admin` and can be changed with `--username`. The builder produces `httpd.conf` with a salted MD5-crypt password hash; it does not store the plaintext password in the payload. Keep both the host password file and generated private payload out of the repository and public artifacts. The strict runtime configuration accepts one hashed account and rejects plaintext passwords or arbitrary HTTP/interpreter directives.
+
+The dashboard account is separate from the stock Telnet login and the Anyka web UI account. HTTP Basic authentication protects access to the pilot but does not encrypt network traffic. Use it only on the intended trusted LAN.
+
+### Place it on the existing card
+
+Power the camera off and mount its existing camera-formatted FAT partition on the computer. Copy only the complete, privately provisioned **`LSCamoflash-fullhan/` folder** to the card root, preserving its name and contents. On the camera this must become **`/mnt/LSCamoflash-fullhan/`**, with `start.sh`, `stop.sh`, `common.sh`, `httpd.conf`, `bin/` and `www/` inside. Authentication stays outside the served `www/` directory.
+
+Use an absent destination; do not merge over another pilot directory or replace an existing service directory to get past a failed check. Preserve recordings, the diagnostic `product.cof` file and firmware backups. Do not run the Anyka installer, copy `HACK/`, or install its `hostapd` launcher and boot markers. The Fullhan pilot does not require repartitioning or formatting.
+
+Safely eject the card, insert it while the camera is off, and boot normally. The pilot has no SD autostart hook. Log into the existing stock diagnostic shell after each camera reboot to start it manually.
+
+### Start and use it
+
+From the camera's root diagnostic shell, run:
+
+```sh
+/mnt/LSCamoflash-fullhan/bin/busybox sh /mnt/LSCamoflash-fullhan/start.sh
+```
+
+The launcher requires FH8626V100 hardware, the exact stock `dgiot` SHA-256 recorded above, a unique writable first FAT MMC partition mounted at `/mnt`, matching payload checksums and a valid hashed account. It also refuses a busy port 8080 or existing pilot state. Do not bypass these checks for a different camera or firmware.
+
+After a successful start, open **`http://<camera-ip>:8080/`** and use the username/password provisioned for this private payload. The stream links still select the stock video-only RTSP endpoints on port 8554; enabling the dashboard does not add microphone audio or RTSP authentication.
+
+If startup fails, preserve the shell's error and any `LSCamoflash-fullhan/startup.log` on the card. That log contains bounded lifecycle messages, not request traces or credential contents. A generated page or successful build alone is not proof that the pilot has started on the camera.
+
+### Stop it
+
+From the same diagnostic shell, run:
+
+```sh
+/mnt/LSCamoflash-fullhan/bin/busybox sh /mnt/LSCamoflash-fullhan/stop.sh
+```
+
+Stop only signals the HTTP process when its PID, start time, executable and command line match the pilot's saved state. If it reports an ownership mismatch, preserve the evidence rather than deleting state or signalling an unrelated process. Successful stop removes the private PID state under `/tmp/lscamoflash-fullhan`; it does not stop `dgiot` or its RTSP service.
+
+Power the camera off before removing the card or archiving the pilot directory. Removing the pilot is not firmware restoration. Reboot clears its running service and RAM state; start it manually again after boot. Repeatable cold-boot persistence and normal-app acceptance remain user/device checks.
+
+### Live pilot validation
+
+On **2026-10-14**, the dedicated SD payload passed its on-camera checksums and checked file/directory flushes. Twelve HTTP checks verified mandatory login, authenticated HTML/JavaScript/status responses, read-only method handling, invalid-host rejection and exclusion of private configuration. A duplicate start was refused; owned shutdown closed port 8080, and manual restart succeeded. The original `dgiot` PID and process start time remained unchanged through the cycle.
+
+With the pilot running, both stock RTSP endpoints decoded 45 frames over TCP, each with exit status zero and completed progress. The dashboard daemon reported **648 KiB resident RAM**, with **13,456 KiB available out of 31,320 KiB total RAM** at the final sample. No OOM message was found in the sampled kernel log. These are short measurements under the tested workload, not a long-term resource or app-connectivity guarantee. No footage was retained.
+
+The complete local regression suite passed **356 tests**, including the 14 Fullhan fixtures and optional ARM checks; the separate credential-free and private builds also passed ARM1176 emulation. Proprietary firmware, diagnostic output and site credentials remain private. Fresh physical SD-remount verification, restoration, browser/user acceptance, internet-blocked operation and cold-boot automatic startup have not been established.
+
 ## What a Fullhan port still needs
 
 This camera starts `dgiot` rather than the Anyka `anyka_ipc` application. The Anyka native `hostapd` hook, SD overlay assumptions and RTSP callback preload were developed for another startup path and binary ABI. They are not compatible Fullhan components.
 
-No automatic custom-script startup from the stock SD card has been established. Guino's non-flashing customization uses an external host to start tools after reboot; that is a separate design from a self-starting LSCamoflash runtime. A Fullhan port still needs a validated startup method, its own service and configuration integration, resource measurements, and repeatable reboot/streaming acceptance. Stock Telnet and RTSP working are useful investigation results, not full runtime support.
+No automatic custom-script startup from the stock SD card has been established. Guino's non-flashing customization uses an external host to start tools after reboot; that is a separate design from a self-starting LSCamoflash runtime. The isolated dashboard is a first manual management pilot. A broader Fullhan port still needs a validated persistent startup method, its own camera-service and configuration integration, longer resource measurements, and repeatable reboot/app/streaming acceptance. Stock Telnet and RTSP working are useful investigation results, not full runtime support.
 
 ## Related primary references
 

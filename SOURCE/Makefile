@@ -1122,6 +1122,11 @@ $(BUILD_HACK)/lib/libcamoflash_rtsp.so: $(SRC_DIR)/contrib/rtsp-callback/rtsp_ca
 backup-kit: download toolchain packages $(STAGING_DIR) busybox
 	@python3 $(ROOT_DIR)/../tools/firmware-backup/build-kit.py --cc "$(CC)" --busybox "$(STAGE_HACK)/bin/busybox" --output "$(ROOT_DIR)/backup-kit"
 
+# Separate manual Fullhan pilot; no credentials or Anyka startup payload.
+.PHONY: fullhan-kit
+fullhan-kit: download toolchain packages $(STAGING_DIR) busybox
+	@python3 $(ROOT_DIR)/../tools/fullhan/build-kit.py --busybox "$(STAGE_HACK)/bin/busybox" --readelf "$(TOOLCHAIN_PATH)/bin/$(HOST)-readelf" --output "$(ROOT_DIR)/fullhan-kit/LSCamoflash-fullhan"
+
 $(BUILD_HACK)/sbin/mosquitto:
 	@cp -a $(STAGE_HACK)/etc/mosquitto $(BUILD_HACK)/etc/config >/dev/null 2>&1 || true
 	@cp $(STAGE_HACK)/usr/sbin/mosquitto $@ >/dev/null 2>&1 || true

@@ -8,6 +8,8 @@ Use the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/release
 
 The detailed validation sections below retain the development history. Older archive hashes, failed camera attempts and statements that no release had been published describe their individual checkpoints, not the current release. Current device setup and acceptance limits are in the [3007325.5 guide](camera-3007325.5.md).
 
+The [Fullhan SZ B22705 / firmware 7.6.23 guide](camera-sz-b22705.md) records a separate platform investigation, its stock RTSP endpoints and host-verified manual firmware backup. Its isolated pilot is developed separately from the Anyka runtime and the published v1.03.2413 assets.
+
 ## Integrated pull requests
 
 All four open pull requests were merged with their original commits and attribution preserved.
