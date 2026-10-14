@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- Include the separate Fullhan recording and discovery helpers in CodeQL extraction by compiling their production branches explicitly.
 - Keep NOR firmware collection running when an optional process disappears during `/proc` inspection, and discard incomplete optional map snapshots. Required flash metadata and paired-read verification remain strict.
 - Verify the Fullhan FH8626V100 SZ B22705 / firmware 7.6.23 diagnostic entry and manual backup path: all six exposed NOR partitions have matching repeated reads, totaling 8 MiB, with a host-verified stock userspace archive. Proprietary firmware and configuration remain private.
 

@@ -102,6 +102,11 @@ jobs:
         sudo apt update && sudo apt install -y build-essential flex bison gsoap binutils make automake autoconf autoconf-archive
         cd SOURCE
         make nproc=8 all
+        # These production helpers belong to a separate optional package.
+        # Compile them explicitly so manual CodeQL extraction includes them.
+        mkdir -p "$RUNNER_TEMP/fullhan-codeql"
+        cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/fullhan-recordings/fullhan_recordings.c -o "$RUNNER_TEMP/fullhan-codeql/recordings.o"
+        cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/fullhan-discovery/discovery.c -o "$RUNNER_TEMP/fullhan-codeql/discovery.o"
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3; Node 24

@@ -59,7 +59,7 @@ Use the [firmware backup guide](firmware-backup.md) for the kit's staging proced
 
 ## Build the separate Fullhan pilot
 
-The [SZ B22705 / firmware 7.6.23 pilot](camera-sz-b22705.md) has a manually started management interface, bounded read-only recording downloads and an optional isolated ONVIF service. It has its own package and does not use the Anyka runtime, installer or SD bootstrap. The richer interface and optional services require their own device acceptance; an earlier status-only pilot passed short live checks.
+The [SZ B22705 / firmware 7.6.23 pilot](camera-sz-b22705.md) has a manually started management interface, bounded read-only recording downloads and an optional isolated ONVIF service. It has its own package and does not use the Anyka runtime, installer or SD bootstrap. The richer interface, recording downloads and direct ONVIF service passed short live checks on the tested camera; the linked guide records measurements and remaining acceptance limits.
 
 To build the static ONVIF candidate and include it in a credential-free Fullhan payload, run from the repository root:
 
@@ -128,6 +128,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 If `qemu-arm` is installed elsewhere, replace both `/usr/bin/qemu-arm` paths with its absolute path. Use a checkout path without spaces for this shell-command configuration. The fixtures do not read a camera's flash or establish device acceptance.
+
+After also building the Fullhan ONVIF candidate, supply `FULLHAN_ONVIF_BIN="$PWD/SOURCE/fullhan-onvif/bin/onvif_srvd"` and `FULLHAN_ONVIF_QEMU=/usr/bin/qemu-arm` alongside the environment variables above to enable the real authenticated SOAP fixtures under ARM1176. The HTTP Range fixtures automatically use `SOURCE/fullhan-busybox/bin/busybox`. Both HTTP and SOAP fixtures need permission to bind loopback sockets; inspect the final test summary for skipped checks. CI supplies these variables and runs the complete suite with the separately built Fullhan outputs.
 
 To run a focused subset, select its test file. For example, the standalone backup tests can be run with:
 
