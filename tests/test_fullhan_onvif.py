@@ -11,12 +11,48 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = REPO / 'SOURCE/src/fullhan'
+
+
+class SHA256DigestAuthHandler(urllib.request.HTTPDigestAuthHandler):
+    """Keep the SOAP fixture compatible with Python 3.11/3.12 urllib."""
+    def get_algorithm_impls(self, algorithm):
+        if algorithm == 'SHA-256':
+            def digest(value):
+                return hashlib.sha256(value.encode('ascii')).hexdigest()
+            return digest, lambda secret, data: digest(secret + ':' + data)
+        return super().get_algorithm_impls(algorithm)
+
+
+class DigestHandlerTests(unittest.TestCase):
+    def test_sha256_rfc7616_vector_when_stdlib_lacks_algorithm_support(self):
+        # RFC 7616 section 3.9.1: independently specified challenge/response.
+        # https://www.rfc-editor.org/rfc/rfc7616.html#section-3.9.1
+        url = 'http://www.example.org/dir/index.html'
+        passwords = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        passwords.add_password('http-auth@example.org', url, 'Mufasa', 'Circle of Life')
+        challenge = {'realm': 'http-auth@example.org', 'qop': 'auth, auth-int', 'algorithm': 'SHA-256',
+                     'nonce': '7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v',
+                     'opaque': 'FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS'}
+        handler = SHA256DigestAuthHandler(passwords)
+        with mock.patch.object(urllib.request.AbstractDigestAuthHandler, 'get_algorithm_impls',
+                               side_effect=ValueError('Unsupported digest authentication algorithm')) as legacy:
+            with self.assertRaises(ValueError):
+                urllib.request.HTTPDigestAuthHandler(passwords).get_authorization(urllib.request.Request(url), challenge)
+            with mock.patch.object(handler, 'get_cnonce', return_value='f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ'):
+                authorization = handler.get_authorization(urllib.request.Request(url), challenge)
+            # Only the legacy baseline touched the deliberately unsupported
+            # stdlib implementation; the SHA-256 fixture handles it itself.
+            legacy.assert_called_once_with('SHA-256')
+        fields = urllib.request.parse_keqv_list(urllib.request.parse_http_list(authorization))
+        self.assertEqual(fields['response'], '753927fa0e85d155564e2e272a28d1802ca10daf4496794697cf8db5856cb6c1')
+        self.assertEqual((fields['algorithm'], fields['qop'], fields['nc']), ('SHA-256', 'auth', '00000001'))
 
 
 @unittest.skipUnless(shutil.which('busybox'), 'Host BusyBox required')
@@ -392,7 +428,7 @@ class OnvifSoapTests(unittest.TestCase):
         if digest:
             passwords = urllib.request.HTTPPasswordMgrWithDefaultRealm()
             passwords.add_password(None, self.url, username, password)
-            opener = urllib.request.build_opener(urllib.request.HTTPDigestAuthHandler(passwords))
+            opener = urllib.request.build_opener(SHA256DigestAuthHandler(passwords))
         try:
             with opener.open(request, timeout=4) as response:
                 return response.status, response.read()
@@ -430,7 +466,11 @@ class OnvifSoapTests(unittest.TestCase):
 
     def test_http_digest_and_unsupported_writes_fail_without_side_effects(self):
         device = 'http://www.onvif.org/ver10/device/wsdl'
-        status, body = self.request('GetCapabilities', device, digest=True)
+        # Force the Python 3.11/3.12 compatibility path even on a newer host.
+        # A server downgrade to another algorithm also fails this control.
+        with mock.patch.object(urllib.request.AbstractDigestAuthHandler, 'get_algorithm_impls',
+                               side_effect=ValueError('Simulated legacy urllib algorithm support')):
+            status, body = self.request('GetCapabilities', device, digest=True)
         self.assertEqual(status, 200)
         for action, namespace in (('SystemReboot', device), ('SetHostname', device),
                                   ('ContinuousMove', 'http://www.onvif.org/ver20/ptz/wsdl'),
