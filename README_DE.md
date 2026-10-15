@@ -34,6 +34,8 @@ Laden Sie zusätzlich `SHA256SUMS` herunter und prüfen Sie das gewählte Archiv
 
 Die Unterstützung richtet sich nach der **genauen Firmware**, nicht allein nach dem Produktnamen. Weitere Anyka-Profile und offene Prüfungen stehen in der [Kompatibilitätsübersicht](docs/integration.md). Kurze erfolgreiche Tests bestätigen keinen Langzeitbetrieb oder jede Funktion der Original-App.
 
+**LSC 3225722 / SZ F26312, Firmware V14.1.5:** [Die Untersuchung läuft](docs/camera-3225722.md). Ein passendes Laufzeitpaket ist noch nicht verfügbar.
+
 ## Erste Schritte
 
 1. **Modell und Firmware prüfen.** Wählen Sie den passenden Kameraleitfaden oben.

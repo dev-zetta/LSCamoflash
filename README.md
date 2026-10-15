@@ -34,6 +34,8 @@ Download `SHA256SUMS` too and verify your chosen archive. The Anyka update packa
 
 Other Anyka profiles are inherited from upstream, including IPC-XC-C323 support. See the [compatibility and integration notes](docs/integration.md). A matching product name alone does not establish compatibility, and short live checks do not establish long-term stability.
 
+**LSC 3225722 / SZ F26312, firmware V14.1.5:** [investigation is in progress](docs/camera-3225722.md). No matching runtime package is available yet.
+
 ## Get started
 
 1. **Check your camera and firmware.** Choose its platform-specific guide above.

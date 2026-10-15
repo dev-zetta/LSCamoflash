@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-No unreleased changes.
+- Add a bounded identity-only collector for the reported YYOS normal-boot SD hook, with 48 host and ARM926 fixture checks, strict MMC/FAT output guards and checked private diagnostic readback. Physical hook execution on firmware V14.1.5 remains pending.
+- Document the LSC 3225722 / SZ F26312 investigation and separate its observed network behavior from community hardware reports. Runtime support and a verified firmware backup remain pending.
 
 ## [2.00.0000] - 2026-10-14
 
