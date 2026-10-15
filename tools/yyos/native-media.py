@@ -407,6 +407,28 @@ def password_result(response):
     raise MediaError('native_password_rejected', number)
 
 
+def verified_media_status(transport):
+    # Queued asynchronous notifications may arrive before the status response.
+    # Only known, well-formed partials permit another read-only query. Never
+    # combine separate notifications into a successful complete status.
+    for _ in range(3):
+        response = transport.status()
+        response_error(response)
+        require(type(response) is dict and type(response.get('dps')) is dict,
+                'invalid_status_response')
+        dps = response['dps']
+        for number in ('237', '239'):
+            require(number not in dps or type(dps[number]) is bool, 'missing_media_status')
+        if '238' in dps:
+            require(password_result(response), 'invalid_password_response')
+        if '237' in dps and '239' in dps:
+            after = safe_status(response)
+            require(after['dp237'] is True and after['dp239'] is True, 'media_verification_failed')
+            return after
+        require(bool(dps) and set(dps) <= {'237', '238', '239'}, 'invalid_status_response')
+    raise MediaError('missing_media_status')
+
+
 def configure(credentials, host, password, old_password=None, timeout=3, retries=0,
               transport_factory=None):
     require(NATIVE_ENABLEMENT_ALLOWED, 'native_enablement_blocked_boot_loop')
@@ -448,9 +470,7 @@ def configure(credentials, host, password, old_password=None, timeout=3, retries
         media_enable_attempted = True
         response_error(transport.set_value(237, True))
         phase = 'final_status'
-        after = safe_status(transport.status())
-        require(after['dp237'] is True and after['dp239'] is True, 'media_verification_failed')
-        return after
+        return verified_media_status(transport)
     except MediaError as error:
         error.phase = phase
         error.password_change_acknowledged = password_change_acknowledged

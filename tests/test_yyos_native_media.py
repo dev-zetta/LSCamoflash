@@ -467,6 +467,71 @@ class TransportTests(unittest.TestCase):
         with self.assertRaisesRegex(MEDIA.MediaError, 'media_verification_failed'):
             MEDIA.configure(credentials(), '192.168.88.17', PASSWORD, transport_factory=lambda *a: fake)
 
+    def test_final_status_tolerates_only_known_partial_notifications(self):
+        good = {'dps': {'237': True, '239': True}}
+        for partials in (({'dps': {'237': True}}, {'dps': {'239': True}}),
+                         ({'dps': {'238': '{"res":"ok"}'}}, {'dps': {'237': False, '238': '{"res":"ok"}'}})):
+            with self.subTest(partials=partials):
+                fake = FakeTransport(statuses=[{'dps': {'237': False, '239': False}}, *partials, good],
+                                     writes=[{'dps': {'238': '{"res":"ok"}'}}])
+                result = MEDIA.configure(credentials(), '192.168.88.17', PASSWORD,
+                                         transport_factory=lambda *a: fake)
+                self.assertTrue(result['dp237'] and result['dp239'])
+                self.assertEqual(sum(call == ('status',) for call in fake.calls), 4)
+                self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
+                self.assertEqual(sum(call == ('receive',) for call in fake.calls), 0)
+
+    def test_final_status_queries_are_bounded_without_combining_partial_flags(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': False, '239': False}},
+                                       {'dps': {'237': True}}, {'dps': {'239': True}},
+                                       {'dps': {'238': '{"res":"ok"}'}},
+                                       {'dps': {'237': True, '239': True}}],
+                             writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'missing_media_status') as caught:
+            MEDIA.configure(credentials(), '192.168.88.17', PASSWORD, transport_factory=lambda *a: fake)
+        self.assertEqual(caught.exception.phase, 'final_status')
+        self.assertTrue(caught.exception.password_change_acknowledged and caught.exception.media_enable_attempted)
+        self.assertEqual(sum(call == ('status',) for call in fake.calls), 4)
+        self.assertEqual(len(fake.statuses), 1)
+        self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
+        self.assertEqual(fake.calls[-1], ('close',))
+
+    def test_final_status_invalid_notifications_fail_without_another_query(self):
+        for response in (None, {'dps': {}}, {'dps': {'unknown': LOCAL_KEY}},
+                         {'dps': {'237': True, 'unknown': PASSWORD}},
+                         {'dps': {'237': 1}}, {'dps': {'239': 'true'}},
+                         {'dps': {'238': {'res': 'ok'}}},
+                         {'dps': {'238': '{"res":"ok","extra":true}'}},
+                         {'dps': {'237': True, '239': True, '238': 1}},
+                         {'Error': PASSWORD, 'Err': '901', 'Payload': LOCAL_KEY}):
+            with self.subTest(response=response):
+                fake = FakeTransport(statuses=[{'dps': {'237': False, '239': False}}, response,
+                                               {'dps': {'237': True, '239': True}}],
+                                     writes=[{'dps': {'238': '{"res":"ok"}'}}])
+                with self.assertRaises(MEDIA.MediaError) as caught:
+                    MEDIA.configure(credentials(), '192.168.88.17', PASSWORD, transport_factory=lambda *a: fake)
+                self.assertEqual(caught.exception.phase, 'final_status')
+                self.assertEqual(sum(call == ('status',) for call in fake.calls), 2)
+                self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
+                for secret in (PASSWORD, LOCAL_KEY, DEVICE_ID):
+                    self.assertNotIn(secret, str(caught.exception))
+
+    def test_final_password_rejection_notification_remains_an_error(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': False, '239': False}},
+                                       {'dps': {'238': '{"res":"failed","errcode":1}'}}],
+                             writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'native_password_rejected') as caught:
+            MEDIA.configure(credentials(), '192.168.88.17', PASSWORD, transport_factory=lambda *a: fake)
+        self.assertEqual((caught.exception.phase, caught.exception.native_errcode), ('final_status', 1))
+        self.assertEqual(sum(call == ('status',) for call in fake.calls), 2)
+        self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
+
+    def test_standalone_read_only_status_still_requires_complete_response(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': True}}, {'dps': {'237': True, '239': True}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'missing_media_status'):
+            MEDIA.request_status(credentials(), '192.168.88.17', transport_factory=lambda *a: fake)
+        self.assertEqual(fake.calls, [('status',), ('close',)])
+
     def test_configure_failure_phases_distinguish_write_progress(self):
         class RequestFailure(FakeTransport):
             def set_value(self, dp, value):
