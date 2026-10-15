@@ -114,6 +114,13 @@ def build(args):
         (stage / 'manifest.json').write_text(json.dumps(package, indent=2, sort_keys=True) + '\n')
         (stage / 'README.md').write_text(
             '# YYOS management boot kit\n\n'
+            '**Known reboot-loop block: do not enable native RTSP/ONVIF or bypass the production configuration gate.** '
+            'Repeated reboots were confirmed after a separate approved native-media attempt. '
+            'Native enablement is blocked before transport; current native settings and the exact cause remain unknown. '
+            'Earlier working HTTP checks preceded that attempt and do not establish current camera health. '
+            'Deployment is paused; a separately tested/reviewed guarded recovery payload is staged awaiting its physical result. '
+            'Successful recovery is unverified; see https://github.com/dev-zetta/LSCamoflash/blob/main/docs/yyos-recovery.md. '
+            'This kit is not a recovery procedure.\n\n'
             'Experimental exact-profile management for 3225722 / SZ F26312 / V14.1.5. '
             'Only card/ belongs on the spare SD card. Building does not access a camera or write a card. '
             'The native telnetd filename starts our bounded launcher, not a Telnet server. '

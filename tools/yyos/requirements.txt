@@ -1,0 +1,2 @@
+cryptography
+tinytuya==1.20.0

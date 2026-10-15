@@ -1,0 +1,21 @@
+# YYOS guarded recovery: physical result pending
+
+The [exact-profile recovery tool](../tools/yyos/recover-native-off.sh) is intended for the observed **3225722 / SZ F26312 / firmware 14.1.5 / AK3918AV130** camera after the [native-media reboot loop](yyos-native-media.md). It passed **45 offline checks: 37 host and eight ARM926**, and independent review. Its private five-file SD payload is staged and safely ejected, awaiting the owner's controlled cold boot and physical result. **Recovery has not been verified; native enablement remains blocked.** This is a description of the reviewed attempt, not a generic deployment recipe.
+
+The reviewed recovery source SHA-256 is `9ee6fc266514ce90f96ec2453211d754c7dae2fd51ab5e8b78af19de3c8380fb`. The staged entry uses the project's native launcher, static BusyBox, recovery `dump.sh`, `yy_debug.ini` and checksums. The normal `yy_telnet_start` marker was archived, all 371 existing files were preserved, and the debug entry was staged last. This debug entry is separate from the normal management and NOR-backup kits; do not mix their markers or treat those kits as recovery payloads.
+
+## Guarded change and handoff
+
+The script requires root, exact hashes for `yy_cam` and the stock init/start scripts, the expected writable MMC/VFAT SD mount, the exact `/config` JFFS2 mount and NOR geometry, and an absent `yy_cam` process. It validates the selected debug entry, rejects symlinked or unsafe paths and uses a retained per-boot RAM lock to prevent a second stock-start attempt. Each operation is bounded, with a 240-second preparation budget; uninterruptible kernel I/O remains outside userspace timeout guarantees.
+
+Its only persistent edit is to **existing `1` values** for `[rtsp] rtsp_on_off` and `[onvif] onvif_on_off` in `/config/param.conf`, replacing those value bytes with **`0`**. Missing flags are treated as default-off and are not added. Passwords and all unrelated bytes remain unchanged. This writes the existing configuration filesystem; it does not erase/program raw MTD, restore a flash image or reset the camera.
+
+Before writing, it preserves the original configuration and metadata privately on SD, verifies their hashes and checks file/directory flushes. The replacement preserves length, formatting, owner and mode, is written through an exclusively created same-filesystem temporary file, flushed and hash-checked, then atomically renamed. The original identity/hash and absence of `yy_cam` are checked again before commit; the configuration directory is flushed and the committed result verified before handoff. Failure can follow a committed configuration change; no automatic rollback is claimed.
+
+If both flags are already off or absent, **`ALREADY_OFF_HOLD_DEBUG`** deliberately holds without editing configuration or starting the stock app. Invalid identity, configuration or pre-handoff state likewise fails closed. Only a verified off edit permits **one** call to the original stock startup script. Its return value and a possible bounded management-start attempt are recorded; neither establishes that the camera became healthy.
+
+## Private evidence and cleanup
+
+Each attempt retains `native-recovery/run-*/` with the original/candidate configuration, plan, metadata, snapshots, logs and status. Keep the whole directory private: configuration and kernel logs can contain credentials, including the earlier native password request. A final **`CONFIG_OFF_STOCK_START_RETURNED`** status means the verified edit and stock-script return completed; the script still records **`physical_recovery_verified=no`**. App reachability, absence of repeated reboots, native listeners and subsequent normal startup require separate checks.
+
+For the staged trial, the owner was asked to cold-boot once, wait about two minutes and leave the card installed while the result is assessed. **Do not change `yy_debug.ini` while the camera is powered**: the stock init monitors mode changes and may reboot. Cleanup requires powering the camera off, retrieving/remounting the card and preserving/verifying the complete private output before archiving the known recovery debug entry. Do not enable the normal marker or retry native configuration as part of cleanup without a reviewed next step. No successful physical recovery or cleanup result is recorded yet.
