@@ -1,6 +1,6 @@
 # Experimental YYOS management dashboard
 
-**This experimental profile currently awaits recovery after repeated reboots following a separate native-media configuration attempt. Native activation is blocked; do not bypass the block or redeploy this pilot as a recovery procedure.** A separate [guarded recovery payload](yyos-recovery.md) passed offline tests and review and is staged, awaiting the owner's controlled cold boot and physical result. Successful recovery has not been established.
+**Native activation remains blocked after the observed reboot loop; do not bypass the block.** The [short recovery boot, exact two-flag edit and private output verification](yyos-recovery.md) passed. Host cleanup archived the recovery debug entry and restored known normal management startup on the card while preserving the existing payload, credentials and recordings. One subsequent normal cold boot passed owner/read-only HTTP/API/Tuya checks; long-term stability and native media remain unverified. The pilot is not a recovery procedure.
 
 This isolated pilot provides an authenticated, read-only dashboard for **LSC 3225722 / SZ F26312**, firmware **V14.1.5**, with the exact AK3918AV130 and `yy_cam` identity recorded in the [camera investigation](camera-3225722.md). **Short live authenticated HTTP checks passed on 2026-10-15 before the native-media attempt.** They are bounded historical evidence and do not establish current camera health. Physical stop/restart, repeated stable boots, browser interaction, detailed recording behavior and native media acceptance remain unverified. Do not use existing Anyka or Fullhan installers for this camera.
 
@@ -42,7 +42,7 @@ The generated `card/` contains **`LSCamoflash-yyos/` plus five root files: `teln
 
 ## Stage the card
 
-Deployment is paused while the camera awaits recovery. The preserved placement procedure below describes the earlier pilot; it is not a recovery payload or an instruction to boot the affected camera before a reviewed recovery procedure is accepted.
+New payload/UI deployment remains a separate step; the restored known normal bootstrap has passed one short cold-boot check. The preserved placement procedure below describes the earlier pilot; it is not a recovery payload or a reason to replace the known payload during this narrow acceptance step.
 
 Keep the verified firmware backup, identity output and existing recordings in private host storage. Use the accepted writable FAT32 first-partition layout from the camera guide; this procedure provides no formatting or repartitioning commands. Power the camera off before retrieving or changing the card.
 
@@ -74,7 +74,7 @@ Run the needed command separately. This kit creates no diagnostic shell. Remove 
 
 ## Native media and acceptance limits
 
-The Streams page displays candidate `rtsp://<camera-ip>:8554/stream0`, `rtsp://<camera-ip>:8554/stream1` and `http://<camera-ip>:5000/onvif/device_service` addresses. A listening TCP port does not establish decoding, audio, authentication or SOAP operation. The dashboard never enables native services or automatically requests media. The separate [native-media helper guide](yyos-native-media.md) records the known reboot loop and production activation block; only offline credential recovery and read-only status remain available. Native settings persistence and media operation are unknown.
+The Streams page displays candidate `rtsp://<camera-ip>:8554/stream0`, `rtsp://<camera-ip>:8554/stream1` and `http://<camera-ip>:5000/onvif/device_service` addresses. A listening TCP port does not establish decoding, audio, authentication or SOAP operation. The dashboard never enables native services or automatically requests media. The separate [native-media helper guide](yyos-native-media.md) records the known reboot loop and production activation block. Recovery-boot status observed DP237 false / DP239 true and no listeners; the same false/true state and absent listeners were observed after one normal cold boot. Exact password/native authentication and long-term stability are unverified.
 
 The management builder passed **10 offline checks including ARM926 execution**, and the runtime passed **12 offline checks**, including authenticated loopback HTTP and owned-process lifecycle, with no skips. Those lifecycle fixtures do not establish physical stop/restart acceptance. The existing [verified NOR backup](camera-3225722.md#observed-nor-geometry) does not establish whole-chip coverage, atomicity or restoration.
 
@@ -94,3 +94,5 @@ On **2026-10-15, before the native-media configuration attempt**, the first user
 | Manifest request | HTTP 404. |
 
 At that pre-activation sample, the status API reported both stock application and owned management running, with **38,112 KiB total RAM**, **17,160 KiB available**, **648 KiB dashboard HTTP RSS** and **9,536 KiB `yy_cam` RSS**. Neither native TCP listener was observed. These counters are historical observations, not current values, measured incremental cost or a stability guarantee. After the separate native attempt, the dashboard disappeared and repeated reboots were confirmed. Physical owned stop/restart, stable repeated boots, user GUI acceptance, detailed recording checks and long-term behavior remain unverified.
+
+On the later [short recovery boot](yyos-recovery.md), unauthenticated/authenticated HTTP returned 401/200, stock app and owned HTTP were reported running, and uptime advanced from 151 to 235 seconds across 84 seconds. Available RAM was 16,596 then 16,800 KiB, with neither native listener observed. Returned private output then verified the exact two-byte flag edit and one stock launch. A subsequent normal cold boot also passed owner/read-only checks: HTTP 401/200, uptime 137 seconds, stock app/management running, native listeners absent and Tuya false/true. Available RAM was 17,208 KiB, HTTP RSS 648 KiB and stock RSS 9,464 KiB. These are short observations; further uptime monitoring, GUI/recording and long-term acceptance remain separate.

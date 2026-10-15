@@ -5,6 +5,8 @@ Requires host cryptography; LAN commands additionally require tinytuya==1.20.0.
 Credentials and passwords are private files, never command-line values. `status`
 only reads. Native enablement is blocked after a boot loop on this exact profile.
 The retained configuration protocol is covered by synthetic tests only.
+New passwords are limited to 8–15 ASCII bytes: this firmware copies them into
+16-byte native RTSP/ONVIF caches including the terminating NUL.
 The stock DP238 handler logs its password request: subsequent raw camera logs
 must remain private. Web-dashboard authentication does not protect these ports.
 This implementation derives storage layout/crypto from the exact backed-up
@@ -35,6 +37,9 @@ EMPTY_PASSWORD_WIRE_VALUE = 'admin'
 # Combined native enablement caused a confirmed boot loop on the target unit.
 # Fixture tests exercise the protocol without permitting production writes.
 NATIVE_ENABLEMENT_ALLOWED = False
+# DP238 accepts up to 32 bytes, but the exact native managers use 16-byte caches
+# with strcpy (RTSP@0x2550e8/0x255144, ONVIF@0x2300ac/0x230108).
+MAX_NEW_PASSWORD_BYTES = 15
 MAX_DATABASE = 1024 * 1024
 PRIVATE_FIELDS = {'format', 'profile', 'firmware_version', 'app_sha256',
                   'device_id', 'local_key', 'protocol_version'}
@@ -205,7 +210,7 @@ def password_file(path, old=False):
 
 
 def validate_password(password):
-    require(type(password) is str and 8 <= len(password) <= 32 and
+    require(type(password) is str and 8 <= len(password) <= MAX_NEW_PASSWORD_BYTES and
             all(33 <= ord(c) <= 126 for c in password) and
             re.search(r'[0-9]', password) is not None and
             re.search(r'[a-z]', password) is not None and

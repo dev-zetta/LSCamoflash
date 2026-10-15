@@ -6,7 +6,7 @@ layout: default
 
 Start with [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) and `SHA256SUMS`. Supported legacy **Anyka** profiles use `LSCamoflash-2.00.0000-uclibc.tar.gz`; the tested **Fullhan SZ B22705 / 7.6.23** uses the separate `LSCamoflash-2.00.0000-fullhan.tar.gz`. Its public folder needs private credentials and manual startup. The GitHub source ZIP is for development and is not ready to copy to a camera.
 
-**Known experimental YYOS block: 3225722 / SZ F26312 / V14.1.5 developed repeated reboots after a native-media configuration attempt. Native enablement is blocked; do not bypass the gate.** A [tested guarded recovery payload](yyos-recovery.md) is staged awaiting its physical result; current native settings and recovery success remain unknown. Neither release runtime above applies to this unit.
+**Known experimental YYOS block: 3225722 / SZ F26312 / V14.1.5 developed repeated reboots after a native-media configuration attempt. Native enablement remains blocked; do not bypass the gate.** The [short recovery boot, exact two-flag edit and private output verification](yyos-recovery.md) passed. The recovery debug entry is archived and known normal management startup restored on the card, and one subsequent normal cold boot passed short owner/read-only checks. Long-term and native-media acceptance remain unverified. Neither release runtime above applies to this unit.
 
 Its [verified identity and NOR backup](camera-3225722.md), short [authenticated management HTTP checks](yyos-management.md#short-live-http-acceptance), and [credential recovery/read-only LAN status](yyos-native-media.md) preceded the failing attempt. They remain bounded historical evidence and do not establish current camera health, native media operation or successful recovery.
 
@@ -16,7 +16,7 @@ Its [verified identity and NOR backup](camera-3225722.md), short [authenticated 
 2. Follow the [firmware backup guide](firmware-backup.md) before runtime installation where supported.
 3. For supported legacy Anyka profiles, use the [installation guide](installation.md) and [configuration guide](configuration.md).
 4. For Fullhan, follow its [download and private setup](camera-sz-b22705.md#prepare-the-private-payload); do not use the Anyka installers.
-5. For 3225722 / SZ F26312, read the [known block and camera evidence](camera-3225722.md); experimental dashboard deployment and native activation are paused pending recovery investigation.
+5. For 3225722 / SZ F26312, read the [known block and camera evidence](camera-3225722.md); one normal-bootstrap cold boot passed short checks, new UI deployment remains separate, and native activation stays blocked.
 
 The [LSC Smart PTZ 3007325.5 / SI L25502 guide](camera-3007325.5.md) covers firmware 6.2863.125.1348. Backup, Wi-Fi, web UI access, local H.265/H.264 video and PCMA microphone audio have been verified on that camera. ONVIF works through manual connection to its H.264 substream. Local mode replaces Tuya app operation; automatic discovery and toolkit PTZ are unavailable for this profile, and long-term stability remains unverified.
 
@@ -33,7 +33,7 @@ The [LSC Smart PTZ 3007325.5 / SI L25502 guide](camera-3007325.5.md) covers firm
 | [3225722 / SZ F26312 camera](camera-3225722.md) | Known reboot-loop block, earlier verified identity/NOR backup and recovery/runtime limits. |
 | [YYOS management pilot](yyos-management.md) | Paused deployment, exact guarded implementation and historical pre-activation HTTP checks. |
 | [YYOS native-media helper](yyos-native-media.md) | Production activation blocked; verified offline credential recovery and historical read-only status. |
-| [YYOS guarded recovery](yyos-recovery.md) | Exact-profile configuration-off mechanism, private evidence and holds; tested/staged, physical result pending. |
+| [YYOS guarded recovery](yyos-recovery.md) | Verified short recovery boot, two-byte flag edit and private evidence; one normal-bootstrap cold boot passed; long-term/native-media limits remain. |
 | [Building and testing](building.md) | Linux dependencies, cross-compilation, verification and regression tests. |
 | [Integration and compatibility](integration.md) | Upstream PRs, issue disposition and historical validation. |
 | [Release notes](release.md) | Published packages and release limitations. |

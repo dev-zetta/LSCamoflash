@@ -1,8 +1,8 @@
 # Experimental YYOS read-only management
 
-**Known reboot-loop block: do not enable native RTSP/ONVIF or bypass the production configuration gate.** After a separate approved native-media attempt, the owner confirmed repeated reboots and the dashboard became unavailable. Native enablement is now blocked before transport; current password/enable persistence and the exact cause remain unknown. A [guarded recovery payload](https://github.com/dev-zetta/LSCamoflash/blob/main/docs/yyos-recovery.md) passed offline tests/review and is staged awaiting its physical result; successful recovery is unverified.
+**Known reboot-loop block: do not enable native RTSP/ONVIF or bypass the production configuration gate.** Repeated reboots followed a separate approved native-media attempt. The [short recovery boot and exact two-flag edit](https://github.com/dev-zetta/LSCamoflash/blob/main/docs/yyos-recovery.md) passed private verification, with enablement observed off and a password-set indicator. The exact password/authentication and reboot cause remain unverified. Host cleanup archived the debug entry and restored known normal management startup on the card; one subsequent normal cold boot passed short owner/read-only checks. Long-term stability remains unverified.
 
-The short authenticated HTTP checks observed before that attempt are bounded historical evidence, not proof of current camera health. Deployment is paused pending recovery; this management payload is not a recovery procedure.
+The pre-activation HTTP, recovery boot and one subsequent normal cold boot are bounded evidence, not long-term acceptance. New UI/payload deployment remains separate; this management payload is not a recovery procedure.
 
 This separate payload is for the observed LSC 3225722 / SZ F26312, firmware V14.1.5, AK3918AV130 and exact `/appfs/bin/yy_cam` SHA256 `d76d632f41453f53d9d117582fc47073934f5e6ec9a9b7a0ebb1dd3824f6cba7`. It requires `/mnt/sdcard/LSCamoflash-yyos` on the verified writable VFAT `/dev/mmcblk0p1`. Another unit or binary must pass its own investigation; do not bypass these fixed guards.
 

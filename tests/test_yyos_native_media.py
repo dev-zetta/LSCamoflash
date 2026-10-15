@@ -26,7 +26,7 @@ SPEC.loader.exec_module(MEDIA)
 KEY = bytes(range(16))
 DEVICE_ID = 'FakeCameraDevice000001'
 LOCAL_KEY = 'SyntheticKey1234'
-PASSWORD = 'SyntheticNewPassword1234'
+PASSWORD = 'SyntheticAbc123'
 
 
 def records():
@@ -330,6 +330,11 @@ class FakeTransport:
         self.calls.append(('close',))
 
 
+class SafetyPolicyTests(unittest.TestCase):
+    def test_production_native_enablement_stays_blocked(self):
+        self.assertIs(MEDIA.NATIVE_ENABLEMENT_ALLOWED, False)
+
+
 class TransportTests(unittest.TestCase):
     def setUp(self):
         # Protocol behavior remains testable without enabling live writes.
@@ -515,12 +520,37 @@ class TransportTests(unittest.TestCase):
                       'NoNumbersHere', 'Has Space12', 'Has\nNewline12', 'NonasciiÄ123', 123, True):
             with self.subTest(value=value), self.assertRaises(MEDIA.MediaError):
                 MEDIA.validate_password(value)
-        for value in ('Ab123456', PASSWORD, 'HasPunctuation12!@#$%^&*()'):
+        for value in ('Ab123456', PASSWORD, 'Ab12!@#$%^&*()'):
             MEDIA.validate_password(value)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.assertEqual(MEDIA.password_file(private_file(root / 'new', PASSWORD.encode() + b'\r\n')), PASSWORD)
             self.assertEqual(MEDIA.password_file(private_file(root / 'old', b''), old=True), '')
+
+    def test_new_password_fits_exact_native_cache_including_nul(self):
+        self.assertEqual(len(PASSWORD.encode('ascii') + b'\0'), 16)
+        MEDIA.validate_password(PASSWORD)
+        for length in (16, 24, 32):
+            value = 'Ab1' + 'x' * (length - 3)
+            factory = mock.Mock()
+            with self.subTest(length=length), self.assertRaisesRegex(MEDIA.MediaError, 'invalid_password'):
+                MEDIA.configure(credentials(), '192.168.88.17', value, transport_factory=factory)
+            factory.assert_not_called()
+            with tempfile.TemporaryDirectory() as directory:
+                path = private_file(Path(directory) / 'new', value.encode('ascii'))
+                with self.assertRaisesRegex(MEDIA.MediaError, 'invalid_password'):
+                    MEDIA.password_file(path)
+
+    def test_old_password_file_retains_existing_value_bound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for length in (24, 63):
+                value = 'Ab1' + 'x' * (length - 3)
+                path = private_file(root / ('old-' + str(length)), value.encode('ascii'))
+                self.assertEqual(MEDIA.password_file(path, old=True), value)
+            path = private_file(root / 'old-64', b'x' * 64)
+            with self.assertRaisesRegex(MEDIA.MediaError, 'invalid_old_password'):
+                MEDIA.password_file(path, old=True)
 
     def test_lan_and_network_bounds_refuse_before_transport(self):
         for host in ('example.com', '8.8.8.8', '127.0.0.1', '::1', '0.0.0.0', '192.168.1.1:6668'):
