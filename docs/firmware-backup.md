@@ -8,9 +8,11 @@ Backups, configuration archives and logs can contain Wi-Fi, cloud and device cre
 
 For the Fullhan SZ B22705 running 7.6.23, use its separate [manual backup entry](camera-sz-b22705.md#manual-backup-through-the-stock-shell). Its six exposed NOR partitions and stock userspace were verified through the collector and host verifier. The Anyka SD `hostapd` launcher and AP markers below do not apply to that camera.
 
+For **LSC 3225722 / SZ F26312, app firmware V14.1.5**, use the camera guide's [separate YYOS source-built kit](camera-3225722.md#build-a-separate-yyos-nor-kit). Its normal-boot root entry and identity capture passed physical checks, including verification of 101 files after SD remount; paired-read firmware backup remains pending. Neither the released v2.00.0000 backup-kit card payload nor the legacy AP markers in the procedure below apply to YYOS. The Fullhan and YYOS procedures also do not install a camera runtime.
+
 ## Download or build the kit
 
-Download `LSCamoflash-<version>-backup-kit.tar.gz` and `SHA256SUMS` from the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest), verify the archive against its checksum, and extract it into a new folder. The kit contains `card/`, `verify-backup.py`, instructions, a manifest and checksums. It requires no runtime installation or compilation. Python 3.9 or later is needed for host verification.
+The remaining steps describe the **3007325.5 legacy AP-hook kit**. Download `LSCamoflash-<version>-backup-kit.tar.gz` and `SHA256SUMS` from the [fork's latest release](https://github.com/dev-zetta/LSCamoflash/releases/latest), verify the archive against its checksum, and extract it into a new folder. The kit contains `card/`, `verify-backup.py`, instructions, a manifest and checksums. It requires no runtime installation or compilation. Python 3.9 or later is needed for host verification.
 
 The archive contains a versioned top-level directory. Set `KIT_DIR` to that directory, replacing the example version with the release you downloaded:
 
@@ -52,6 +54,8 @@ python3 "$KIT_DIR/verify-backup.py" "/private/path/firmware-backup/run-TIMESTAMP
 A successful command exits zero and reports `verified: true`, the partition count, total bytes and individual SHA-256 hashes. On the tested unit, `status.txt` reported `VERIFIED_NOR_BACKUP`, eight partitions and 8 MiB. The verifier checks the complete recorded inventory and archive payloads without executing or extracting the recovered firmware. A partial archive or a nonzero exit is not a verified backup. Keep the paired partition files and metadata together; do not concatenate them into a guessed flash image.
 
 The dumper has a 240-second monotonic budget, per-command timeouts, up to three paired read attempts, explicit size limits, and strict visible MMC/FAT mount checks. Kernel I/O stuck in an uninterruptible state cannot be bounded by a userspace timeout. Missing output is not proof that the hook never ran: the launcher intentionally writes no log when it cannot establish a safe SD destination. Inspect the launch log and incomplete run status before changing the procedure.
+
+Current source also captures present `/appfs` and `/config` userspace trees and optional metadata for the exact `yy_cam` process name alongside `anyka_ipc`. Those additions support YYOS investigation without changing the legacy entry procedure. They do not establish a verified backup on a new model; only completed paired reads and successful private host verification can do that.
 
 ## Disable the backup hook
 

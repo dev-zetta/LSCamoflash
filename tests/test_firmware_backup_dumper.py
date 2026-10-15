@@ -7,7 +7,8 @@ ARM_BB = os.environ.get('BACKUP_ARM_BUSYBOX')
 HOST_BB = shutil.which(os.environ.get('HOST_BUSYBOX', 'busybox'))
 SOURCE = (REPO / 'tools/firmware-backup/backup-nor.sh').read_text()
 PROCESS_SNAPSHOT_CASES={'process-snapshot','process-comm-race','process-maps-race','process-maps-partial'}
-SUCCESS_CASES={'ok','nor256','nor256-stacked','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','run-collision'} | PROCESS_SNAPSHOT_CASES
+YYOS_CASES={'yyos-userspace','yyos-process-snapshot','yyos-process-exit','yyos-process-maps-partial','yyos-process-exe-race','yyos-process-name-rejected','yyos-process-pid-rejected'}
+SUCCESS_CASES={'ok','nor256','nor256-stacked','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','run-collision'} | PROCESS_SNAPSHOT_CASES | YYOS_CASES
 MOUNT_FAILURE_CASES={'not-sd','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','sd-stat-error'}
 NOR256_CASES=['nor256','nor256-stacked','nor256-nand','nor256-oob','nor256-zero','nor256-unsupported','nor256-erase-unaligned','nor256-size-unaligned','nor256-erase-division']
 def fixture(case, target=False):
@@ -33,6 +34,18 @@ def fixture(case, target=False):
             (process/'comm').write_text('anyka_ipc\n')
             (process/'maps').write_text('fixture-process-mapping\n')
             (process/'exe').symlink_to(fs/'usr/bin/anyka_ipc')
+        if case in YYOS_CASES:
+            for directory in (fs/'appfs/bin',fs/'appfs/script',fs/'appfs/lib',fs/'config'):directory.mkdir(parents=True,exist_ok=True)
+            (fs/'appfs/bin/yy_cam').write_bytes(b'FAKE-YYOS-APP\x00')
+            (fs/'appfs/script/start.sh').write_text('#!/bin/sh\n# synthetic startup; never execute\nexit 99\n')
+            (fs/'appfs/lib/libyy.so').write_bytes(b'FAKE-YYOS-MATCHING-LIB\x00')
+            (fs/'appfs/lib/libalias.so').symlink_to('libyy.so')
+            (fs/'config/param.conf').write_text('PRIVATE-SYNTHETIC-YYOS-FIXTURE\n')
+            if case!='yyos-userspace':
+                process=proc/('2135bad' if case=='yyos-process-pid-rejected' else '2135');process.mkdir()
+                (process/'comm').write_text('yy_cam/../../invalid\n' if case=='yyos-process-name-rejected' else 'yy_cam\n')
+                (process/'maps').write_text('fixture-yyos-process-mapping\n')
+                (process/'exe').symlink_to(fs/'appfs/bin/yy_cam')
         s=SOURCE
         for key,val in [('PROC',proc),('SYS',sys),('DEV',dev),('FS_ROOT',fs)]:
             s=s.replace(key+'=/'+{'PROC':'proc','SYS':'sys','DEV':'dev','FS_ROOT':''}[key]+'\n',key+'='+str(val)+'\n',1)
@@ -116,20 +129,23 @@ def fixture(case, target=False):
                 behavior='if [ "$1" = dd ]; then\n  out=\n  for arg do case "$arg" in of=*) out=${arg#of=};; esac; done\n  "'+str(real)+'" "$@" || exit $?\n  case "$out" in *read2.part) "'+str(real)+'" dd if=/dev/zero of="$out" bs=4096 count=1 2>/dev/null;; esac\n  exit 0\nfi\n'
             bb.write_text('#!/bin/sh\n'+behavior+'exec "'+str(real)+'" "$@"\n');bb.chmod(0o755)
         race_marker=root/'process-race-triggered'
-        if case in ('process-comm-race','process-maps-race','process-maps-partial'):
+        if case in ('process-comm-race','process-maps-race','process-maps-partial','yyos-process-exit','yyos-process-maps-partial','yyos-process-exe-race'):
             real=sd/'real-busybox';bb.rename(real)
-            vanished=proc/'2135'/('comm' if case=='process-comm-race' else 'maps')
+            vanished=proc/'2135'/('comm' if case in ('process-comm-race','yyos-process-exit') else 'exe' if case=='yyos-process-exe-race' else 'maps')
+            applet='readlink' if case=='yyos-process-exe-race' else 'cat'
             behavior=(
-                f'if [ "$1" = cat ] && [ "${{2-}}" = "{vanished}" ]; then\n'
-                f'  "{real}" rm -f "$2" || exit $?\n'
-                f'  printf "triggered\\n" > "{race_marker}"\n'
-                + ('  printf "incomplete-process-mapping\\n"; exit 7\n' if case=='process-maps-partial' else '')
+                f'if [ "$1" = {applet} ] && [ "${{2-}}" = "{vanished}" ]; then\n'
+                + (f'  "{real}" rm -rf "{proc}/2135" || exit $?\n' if case=='yyos-process-exit' else f'  "{real}" rm -f "$2" || exit $?\n')
+                + f'  printf "triggered\\n" > "{race_marker}"\n'
+                + ('  printf "incomplete-process-mapping\\n"; exit 7\n' if case in ('process-maps-partial','yyos-process-maps-partial','yyos-process-exe-race') else '')
                 + 'fi\n')
             bb.write_text('#!/bin/sh\n'+behavior+f'exec "{real}" "$@"\n');bb.chmod(0o755)
         before={str(p.relative_to(dev)):hashlib.sha256(p.read_bytes()).hexdigest() for p in dev.iterdir() if p.is_file()}
+        yyos_before={str(p.relative_to(fs)):hashlib.sha256(p.read_bytes()).hexdigest() for tree in ('appfs','config') for p in (fs/tree).rglob('*') if p.is_file() and not p.is_symlink()}
         t=time.monotonic();r=subprocess.run(command,cwd='/',stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=45)
         duration=time.monotonic()-t
         after={str(p.relative_to(dev)):hashlib.sha256(p.read_bytes()).hexdigest() for p in dev.iterdir() if p.is_file()}
+        yyos_after={str(p.relative_to(fs)):hashlib.sha256(p.read_bytes()).hexdigest() for tree in ('appfs','config') for p in (fs/tree).rglob('*') if p.is_file() and not p.is_symlink()}
         all_runs=list((sd/'firmware-backup').glob('run-*')) if (sd/'firmware-backup').exists() else []
         preserved=all({p.name:p.read_bytes() for p in (sd/'firmware-backup'/name).iterdir()}==files for name,files in existing_runs.items())
         runs=[p for p in all_runs if p.name not in existing_runs]
@@ -137,7 +153,8 @@ def fixture(case, target=False):
         log=(run/'run.log').read_text() if run and (run/'run.log').exists() else ''
         status=(run/'status.txt').read_text() if run and (run/'status.txt').exists() else ''
         ok=(r.returncode==0) if case in SUCCESS_CASES else (r.returncode!=0)
-        ok=ok and before==after and preserved and not (sd/'.firmware-backup.lock').exists()
+        ok=ok and before==after and yyos_before==yyos_after and preserved and not (sd/'.firmware-backup.lock').exists()
+        ok=ok and 'PRIVATE-SYNTHETIC-YYOS-FIXTURE' not in r.stdout+r.stderr
         if case=='run-collision':
             ok=ok and len(runs)==1 and run.name=='run-fixture-collision-1'
         if case=='run-collision-exhausted':
@@ -152,6 +169,15 @@ def fixture(case, target=False):
                 else:
                     ok=ok and race_marker.read_text()=='triggered\n' and not maps.exists()
                     ok=ok and (not exe.exists() if case=='process-comm-race' else exe.read_text().strip()==str(fs/'usr/bin/anyka_ipc'))
+            if case in YYOS_CASES:
+                maps=run/'meta/yy_cam-2135-maps.txt';exe=run/'meta/yy_cam-2135-exe.txt'
+                if case in ('yyos-userspace','yyos-process-exit','yyos-process-name-rejected','yyos-process-pid-rejected'):
+                    ok=ok and not list((run/'meta').glob('yy_cam*'))
+                else:
+                    ok=ok and (not maps.exists() if case=='yyos-process-maps-partial' else maps.read_text()=='fixture-yyos-process-mapping\n')
+                    ok=ok and (not exe.exists() if case=='yyos-process-exe-race' else exe.read_text().strip()==str(fs/'appfs/bin/yy_cam'))
+                if case in ('yyos-process-exit','yyos-process-maps-partial','yyos-process-exe-race'):
+                    ok=ok and race_marker.read_text()=='triggered\n'
             if case.startswith('nor256'):
                 import csv
                 with (run/'partitions.tsv').open() as stream:
@@ -167,6 +193,10 @@ def fixture(case, target=False):
                 ok=ok and a.extractfile('usr/bin/anyka_ipc').read()==(fs/'usr/bin/anyka_ipc').read_bytes()
                 ok=ok and a.extractfile('lib/libavssdkbeta.so').read()==(fs/'lib/libavssdkbeta.so').read_bytes()
                 ok=ok and a.getmember('lib/libalias.so').issym()
+                if case in YYOS_CASES:
+                    for path in ('appfs/bin/yy_cam','appfs/script/start.sh','appfs/lib/libyy.so','config/param.conf'):
+                        ok=ok and a.extractfile(path).read()==(fs/path).read_bytes()
+                    ok=ok and a.getmember('appfs/lib/libalias.so').issym()
         else:
             ok=ok and not status.startswith('VERIFIED_NOR_BACKUP')
             if case in MOUNT_FAILURE_CASES:
@@ -178,8 +208,8 @@ def fixture(case, target=False):
         item={'case':case,'shell':'ARM BusyBox/QEMU' if target else 'host BusyBox','exit_code':r.returncode,'duration_seconds':round(duration,3),'pass':ok,'fixture':str(root),'status':status.strip(),'stdout':r.stdout.strip(),'stderr':r.stderr.strip(),'log_tail':log[-1200:] if not ok else ''}
         if not ok:raise AssertionError(item)
 
-HOST_CASES = ['ok','nand','type-missing','geometry','devnum','size-cap','short-read','unstable','wc-error','extra-sysfs','not-sd','deadline','timeout','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','sd-stat-error','run-collision','run-collision-exhausted'] + NOR256_CASES + sorted(PROCESS_SNAPSHOT_CASES)
-ARM_CASES = ['ok','nand','short-read','unstable','wc-error','timeout','stacked-tmpfs','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','run-collision','run-collision-exhausted'] + NOR256_CASES + sorted(PROCESS_SNAPSHOT_CASES)
+HOST_CASES = ['ok','nand','type-missing','geometry','devnum','size-cap','short-read','unstable','wc-error','extra-sysfs','not-sd','deadline','timeout','stacked-tmpfs','stacked-tmpfs-reversed','stacked-other-device','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','sd-stat-error','run-collision','run-collision-exhausted'] + NOR256_CASES + sorted(PROCESS_SNAPSHOT_CASES) + sorted(YYOS_CASES)
+ARM_CASES = ['ok','nand','short-read','unstable','wc-error','timeout','stacked-tmpfs','wide-device-number','visible-non-fat','visible-wrong-device','visible-ro','stacked-rw-ro','duplicate-sd','run-collision','run-collision-exhausted'] + NOR256_CASES + sorted(PROCESS_SNAPSHOT_CASES) + sorted(YYOS_CASES)
 
 class DumperTests(unittest.TestCase):
     pass

@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Add a bounded identity-only collector for the reported YYOS normal-boot SD hook, with 48 host and ARM926 fixture checks, strict MMC/FAT output guards and checked private diagnostic readback. Physical hook execution on firmware V14.1.5 remains pending.
-- Document the LSC 3225722 / SZ F26312 investigation and separate its observed network behavior from community hardware reports. Runtime support and a verified firmware backup remain pending.
+- Add a bounded identity-only collector for the YYOS normal-boot SD hook, with 48 host and ARM926 fixture checks and strict MMC/FAT output guards. Physical execution on LSC 3225722 / SZ F26312, app firmware V14.1.5, confirmed root access and completion; 101 checksummed diagnostic files passed verification after physical SD remount and private host copy.
+- Extend the generic NOR collector's userspace archive to include `/appfs` and `/config`, and retain optional process metadata for the exact `yy_cam` name alongside `anyka_ipc`. Process-exit races remain optional; required flash metadata and paired-read checks stay strict.
+- Add a separate source-built YYOS NOR kit using the verified normal-boot entry and its own native `telnetd` launcher, without legacy AP/debug/factory markers. Document the exact card inventory, private host verification and marker removal. Paired-read backup acceptance, local media and LSCamoflash runtime support for 3225722 remain pending; the new builder's output has not been physically accepted.
 
 ## [2.00.0000] - 2026-10-14
 

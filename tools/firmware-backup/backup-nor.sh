@@ -139,19 +139,23 @@ for pid_path in "$PROC"/[0-9]*; do
     # Processes can exit after the readability check. These snapshots are
     # optional; required flash metadata below must still fail on read errors.
     comm=$(tool cat "$pid_path/comm" 2>/dev/null) || continue
-    [ "$comm" = anyka_ipc ] || continue
+    # Only these exact names may form metadata filenames.
+    case "$comm" in anyka_ipc|yy_cam) ;; *) continue;; esac
     pid=${pid_path##*/}
+    is_uint "$pid" || continue
     if [ -r "$pid_path/maps" ]; then
-        if ! tool cat "$pid_path/maps" > "$OUT/meta/anyka_ipc-$pid-maps.txt" 2>/dev/null; then
-            tool rm -f "$OUT/meta/anyka_ipc-$pid-maps.txt" || :
+        if ! tool cat "$pid_path/maps" > "$OUT/meta/$comm-$pid-maps.txt" 2>/dev/null; then
+            tool rm -f "$OUT/meta/$comm-$pid-maps.txt" || :
         fi
     fi
-    tool readlink "$pid_path/exe" > "$OUT/meta/anyka_ipc-$pid-exe.txt" 2>&1 || :
+    if ! tool readlink "$pid_path/exe" > "$OUT/meta/$comm-$pid-exe.txt" 2>/dev/null; then
+        tool rm -f "$OUT/meta/$comm-$pid-exe.txt" || :
+    fi
 done
 # Capture the complete standard userspace trees together; tar preserves symlinks.
 # The raw APP/rootfs MTD images remain the authoritative matching binary/library set.
 set --
-for tree in bin sbin lib lib32 lib64 usr etc opt; do
+for tree in bin sbin lib lib32 lib64 usr etc opt appfs config; do
     [ ! -e "$FS_ROOT/$tree" ] && [ ! -L "$FS_ROOT/$tree" ] || set -- "$@" "$tree"
 done
 [ "$#" -gt 0 ] || die 'No stock userspace trees found'
