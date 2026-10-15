@@ -16,10 +16,10 @@ sudo apt-get install -y \
   git git-lfs ca-certificates curl unzip tar gzip bzip2 xz-utils \
   build-essential binutils make cmake flex bison gsoap \
   automake autoconf autoconf-archive pkg-config perl patch \
-  python3 busybox fdisk qemu-user openssl nodejs
+  python3 python3-cryptography busybox fdisk qemu-user openssl nodejs
 ```
 
-The compiler and GNU build tools compile the bundled projects. The host `gsoap` package supplies the SOAP code generators used by ONVIF; the build also cross-compiles the camera's gSOAP library. `curl` and the archive utilities fetch and unpack source inputs. `busybox` and `fdisk` support host regression fixtures, while `qemu-user` provides `qemu-arm` for running ARM userspace checks without hardware. Host OpenSSL hashes private dashboard credentials, and Node.js runs the browser behavior fixtures without npm packages.
+The compiler and GNU build tools compile the bundled projects. The host `gsoap` package supplies the SOAP code generators used by ONVIF; the build also cross-compiles the camera's gSOAP library. `curl` and the archive utilities fetch and unpack source inputs. `busybox` and `fdisk` support host regression fixtures, while `qemu-user` provides `qemu-arm` for running ARM userspace checks without hardware. Host OpenSSL hashes private dashboard credentials, Python `cryptography` supports offline YYOS backup decoding and its synthetic fixtures, and Node.js runs the browser behavior fixtures without npm packages.
 
 The [Build-Test workflow](../.github/workflows/makefile.yml) is the reference for the current CI environment and build steps. It runs on GitHub's Ubuntu image, where some common utilities are already installed; the command above lists those utilities explicitly for a fresh host.
 

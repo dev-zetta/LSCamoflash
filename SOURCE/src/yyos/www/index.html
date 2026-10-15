@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>LSCamoflash · YYOS camera</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <script src="dashboard.js" defer></script>
+</head>
+<body>
+  <header class="navbar"><div class="container navbar-inner"><a class="brand" href="./">LSCamoflash <span>YYOS</span></a><span class="pilot-badge">Experimental</span></div></header>
+  <main class="container">
+    <div class="page-heading"><div><p class="eyebrow">Camera overview</p><h1 id="model">LSC 3225722</h1><p class="muted"><span id="firmware">Connecting…</span> · <span id="ip">—</span></p></div><div class="heading-actions"><span id="connection" class="status-badge">Connecting</span><button id="refresh-status" class="button button-secondary" type="button">Refresh status</button></div></div>
+    <p id="error" class="notice notice-error" role="alert" hidden></p>
+    <nav class="tabs" role="tablist" aria-label="Camera pages">
+      <button id="tab-dashboard" class="tab active" type="button" role="tab" aria-controls="panel-dashboard" aria-selected="true">Dashboard</button>
+      <button id="tab-streams" class="tab" type="button" role="tab" aria-controls="panel-streams" aria-selected="false" tabindex="-1">Streams</button>
+      <button id="tab-diagnostics" class="tab" type="button" role="tab" aria-controls="panel-diagnostics" aria-selected="false" tabindex="-1">Diagnostics</button>
+    </nav>
+    <section id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
+      <div class="metric-grid">
+        <article class="card metric"><h2>RAM used</h2><p id="ram-used" class="metric-value">—</p><progress id="ram-meter" max="100" value="0" aria-label="RAM used" hidden></progress><p id="memory" class="muted">Available RAM: —</p><p id="ram-note" class="small muted">Uses the kernel's available-memory estimate.</p></article>
+        <article class="card metric"><h2>SD card used</h2><p id="storage-used" class="metric-value">—</p><progress id="storage-meter" max="100" value="0" aria-label="SD card used" hidden></progress><p id="storage-available" class="muted">Available space: —</p></article>
+        <article class="card metric"><h2>CPU load</h2><p id="cpu-load" class="metric-value">—</p><p class="muted">1-minute average</p><p class="small muted">Load average is not CPU usage percent.</p></article>
+        <article class="card metric"><h2>Uptime</h2><p id="uptime" class="metric-value metric-duration">—</p><p class="muted">Since the camera last started</p><p id="last-updated" class="small muted">Waiting for status</p></article>
+      </div>
+      <article class="card"><h2>Services</h2><dl class="service-grid"><div><dt>Stock camera application</dt><dd id="service-stock">Not reported</dd></div><div><dt>Management HTTP</dt><dd id="service-management">Not reported</dd></div><div><dt>Native TCP port 8554</dt><dd id="service-rtsp">Not reported</dd></div><div><dt>Native TCP port 5000</dt><dd id="service-onvif">Not reported</dd></div></dl><p class="small muted">A listening port does not establish working media, authentication or ONVIF operations.</p></article>
+      <article class="card"><h2>Camera controls</h2><p class="muted">Use the stock app for supported camera settings. This dashboard provides status only; settings, PTZ, recordings, reboot and firmware updates are unavailable.</p></article>
+    </section>
+    <section id="panel-streams" role="tabpanel" aria-labelledby="tab-streams" hidden>
+      <p class="notice">Native streaming and ONVIF acceptance are pending for this firmware. These are candidate addresses; codec, audio, authentication and client operation remain unverified. This dashboard does not enable these services or automatically request media.</p>
+      <div class="two-column"><article class="card"><h2>Main stream candidate</h2><a id="main" class="stream-url">Waiting for status</a></article><article class="card"><h2>Substream candidate</h2><a id="sub" class="stream-url">Waiting for status</a></article></div>
+      <article class="card"><h2>Native ONVIF candidate</h2><a id="onvif-url" class="stream-url">Waiting for status</a><p class="small muted">The dashboard account protects this interface only. Native service authentication is separate and remains unverified.</p></article>
+    </section>
+    <section id="panel-diagnostics" role="tabpanel" aria-labelledby="tab-diagnostics" hidden>
+      <article class="card"><h2>System details</h2><dl class="detail-grid"><dt>Backend</dt><dd id="backend">—</dd><dt>CPU load · 1 / 5 / 15 minutes</dt><dd id="cpu-loads">—</dd><dt>Dashboard resident memory</dt><dd id="management-rss">Not reported</dd><dt>Camera application resident memory</dt><dd id="stock-rss">Not reported</dd><dt>RAM total</dt><dd id="ram-total">—</dd><dt>RAM available</dt><dd id="ram-available">—</dd></dl><p class="small muted">Resident process memory is part of total system memory.</p></article>
+      <article class="card"><h2>About this interface</h2><p class="muted">This isolated YYOS interface leaves the stock camera application, configuration and networking in control. It refreshes status every 15 seconds while visible. Startup and shutdown affect only its owned HTTP process.</p><p class="muted">The bounded startup log contains fixed lifecycle messages. Credentials and firmware backups are outside the served directory. Keep this experimental HTTP interface on the intended trusted LAN.</p></article>
+    </section>
+    <footer>LSCamoflash · YYOS experimental dashboard <span>Authenticated access · Trusted LAN</span></footer>
+  </main>
+  <noscript><p class="container notice">Enable JavaScript to view camera status.</p></noscript>
+</body>
+</html>

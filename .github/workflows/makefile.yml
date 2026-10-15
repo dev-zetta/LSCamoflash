@@ -3,10 +3,10 @@ name: Build-Test
 on:
   push:
     branches: [main]
-    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tools/fullhan/**', 'tests/**', 'CHANGELOG.md', '.github/workflows/**']
+    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tools/fullhan/**', 'tools/yyos/**', 'tests/**', 'CHANGELOG.md', '.github/workflows/**']
   pull_request:
     branches: [main]
-    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tools/fullhan/**', 'tests/**', 'CHANGELOG.md', '.github/workflows/**']
+    paths: ['SOURCE/**', 'tools/firmware-backup/**', 'tools/fullhan/**', 'tools/yyos/**', 'tests/**', 'CHANGELOG.md', '.github/workflows/**']
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1; Node 24
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y build-essential busybox fdisk flex bison gsoap binutils make cmake python3 automake autoconf autoconf-archive qemu-user openssl
+        run: sudo apt-get update && sudo apt-get install -y build-essential busybox fdisk flex bison gsoap binutils make cmake python3 python3-cryptography automake autoconf autoconf-archive qemu-user openssl
       - name: Build default ARM uclibc packages and archives
         shell: bash
         run: |
@@ -33,6 +33,8 @@ jobs:
         env:
           QEMU_ARM: /usr/bin/qemu-arm
         run: make -C SOURCE fullhan-busybox-kit fullhan-onvif-kit fullhan-kit FULLHAN_ONVIF_KIT="${{ github.workspace }}/SOURCE/fullhan-onvif"
+      - name: Build separate credential-free YYOS management with ARM926 smoke
+        run: python3 tools/yyos/build-kit.py --output SOURCE/yyos-kit --busybox SOURCE/backup-kit/card/busybox --qemu /usr/bin/qemu-arm
       - name: Run regressions with ARM926 BusyBox ash and backup tools
         env:
           CAMOFLASH_RUNTIME_SHELL: /usr/bin/qemu-arm -cpu arm926 ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash

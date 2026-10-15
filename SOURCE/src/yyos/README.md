@@ -1,0 +1,11 @@
+# Experimental YYOS read-only management
+
+This separate payload is for the observed LSC 3225722 / SZ F26312, firmware V14.1.5, AK3918AV130 and exact `/appfs/bin/yy_cam` SHA256 `d76d632f41453f53d9d117582fc47073934f5e6ec9a9b7a0ebb1dd3824f6cba7`. It requires `/mnt/sdcard/LSCamoflash-yyos` on the verified writable VFAT `/dev/mmcblk0p1`. Another unit or binary must pass its own investigation; do not bypass these fixed guards.
+
+The payload provides an authenticated HTTP dashboard on port 8080, backed by a static ARMv5 BusyBox and one read-only status CGI. A separately provisioned, regular `httpd.conf` outside `www/` must contain exactly one supported hashed account. There is no default password. The stock camera, network and configuration remain under vendor control. The payload has no settings, PTZ, recording browser, shell endpoint, reboot, firmware update, overlays, media encoder or additional ONVIF/discovery daemon.
+
+Start it manually with its static BusyBox and `start.sh`; use `stop.sh` to stop only the matching owned HTTP process. PID, executable, full arguments and process start time must match before a signal is sent. Existing state and unknown payload files are refused. A failed start retains state if its owned HTTP child cannot be confirmed stopped. `startup.log` contains only bounded fixed lifecycle messages. Keep site credentials and private evidence outside the served directory, and stop the owned service before replacing the payload.
+
+The Streams view displays allowlisted candidate native RTSP and ONVIF addresses. Listener observations do not prove media decoding, authentication, audio or SOAP operation. All native service acceptance remains explicitly pending until separately tested on this firmware; the web account does not protect other camera services. No status request enables or changes a native service. Use this experimental interface on the intended trusted LAN; HTTP Basic authentication does not encrypt traffic.
+
+The source shares the project's lightweight Fullhan interface design but uses an isolated YYOS profile and payload inventory. Project code and BusyBox retain separate licenses supplied by the host builder. Automated fixtures establish guarded software behavior; physical startup, normal-app/recording coexistence, resource use and repeated cold boots require separate acceptance.
