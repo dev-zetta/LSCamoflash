@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an explicit SSH-guarded native setup path with fresh exact-profile checks, independent RTSP/ONVIF flags and listeners, durable private preservation, acknowledgement/readback gates and one-attempt journals. Legacy unguarded configuration remains blocked. Fifty-five offline tests and live refusal on an enabled camera passed; the new guarded write sequence still needs physical acceptance.
+
 - Add an isolated, explicitly enabled key-only SSH runtime for the exact 3225722 / SZ F26312 / V14.1.5 profile, with ARM926 Dropbear build provenance, protected RAM keys and guarded LAN startup. Short physical normal-boot checks on 2026-10-16 accepted pinned-host/owner-key root access, rejected wrong-key/password methods, accepted PTY access with stdin held open and verified a 32 KiB SD upload/atomic-rename/download/cleanup round trip. An initial EOF-sensitive PTY fixture failure was preserved/reproduced under QEMU, with no firmware fix claimed. SSH master RSS was 292 KiB / one thread.
 
 - Retain the public native RTSP/ONVIF configuration block for 3225722 / SZ F26312 / firmware 14.1.5 after an approved 24-byte-password attempt returned `invalid_status_response`, services disappeared and repeated reboots were confirmed. Recovery, a controlled 15-byte trial and subsequent native-enabled normal startup passed short checks. Production `configure` still refuses before transport with `native_enablement_blocked_boot_loop`: active-service password rotation, independent verification of both enable flags and fresh live application identity need write-path safeguards. The exact earlier reboot cause remains unproven; current short runtime acceptance does not unblock public writes.

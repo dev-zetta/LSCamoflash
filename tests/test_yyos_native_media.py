@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic storage and fake LAN transport; never contact or execute a camera."""
 import contextlib
+import base64
 import hashlib
 import importlib.util
 import io
@@ -12,6 +13,7 @@ import stat
 import struct
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest import mock
 import zlib
@@ -328,6 +330,340 @@ class FakeTransport:
 
     def close(self):
         self.calls.append(('close',))
+
+
+OLD_GUARDED = 'OldSyntheticAb1' + 'x' * 9
+
+
+def native_param(password=OLD_GUARDED, rtsp=False, onvif=False):
+    return ('[rtsp]\nrtsp_on_off=%d\nrtsp_password=%s\n[onvif]\nonvif_on_off=%d\nonvif_password=%s\n' %
+            (rtsp, password, onvif, password)).encode()
+
+
+def snapshot_frame(param=None, **changes):
+    param = param if param is not None else native_param()
+    checksum = hashlib.sha256(param).hexdigest()
+    metadata = {'uid': '0', 'hardware': 'AK3918AV130', 'app_sha256': MEDIA.APP_SHA256,
+                'busybox_sha256': MEDIA.SSH_BUSYBOX_SHA, 'stock_pid': '446', 'stock_start_time': '100',
+                'running_app_sha256': MEDIA.APP_SHA256, 'config_uid': '0', 'config_gid': '0',
+                'config_mode': '644', 'config_bytes': str(len(param)), 'config_inode': '81',
+                'config_sha256': checksum, 'config_sha256_after': checksum,
+                'rtsp_listening': '0', 'onvif_listening': '0', 'param_base64': base64.b64encode(param).decode(),
+                'sd_mount_matches': '1', 'sd_visible_dev': str(os.makedev(179, 1)),
+                'sd_device_number': 'b3:1', 'sd_magic': '4d44', 'config_mount_matches': '1',
+                'config_visible_dev': str(os.makedev(31, 4)), 'config_device_number': '1f:4', 'config_magic': '72b6',
+                'mtd_type': 'nor', 'mtd_size': '262144', 'mtd_erasesize': '4096', 'mtd_writesize': '256',
+                'mtd_oobsize': '0', 'mtd_offset': '7995392'}
+    metadata.update(changes)
+    return ('LSCAMOFLASH_YYOS_NATIVE_SNAPSHOT_V1\n' + ''.join(key + '=' + value + '\n'
+                                                          for key, value in metadata.items())).encode()
+
+
+def snapshot(param=None, **changes):
+    return MEDIA.parse_ssh_snapshot(snapshot_frame(param, **changes))
+
+
+class FakeSSH:
+    def __init__(self, values):
+        self.values, self.calls = list(values), 0
+
+    def snapshot(self):
+        self.calls += 1
+        value = self.values.pop(0)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+
+class GuardedConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.operation = self.root / 'new-operation'
+        self.initial = snapshot()
+        self.changed = snapshot(native_param(PASSWORD))
+        self.enabled = snapshot(native_param(PASSWORD, True, True), rtsp_listening='1', onvif_listening='1')
+
+    def flow(self, ssh=None, transport=None, old=OLD_GUARDED, operation=None):
+        ssh = ssh or FakeSSH([self.initial, self.initial, self.changed, self.enabled])
+        transport = transport or FakeTransport(statuses=[{'dps': {'237': False, '239': True}},
+                                                         {'dps': {'237': False, '239': True}},
+                                                         {'dps': {'237': True, '239': True}}],
+                                               writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        result = MEDIA.configure_guarded(credentials(), '192.168.88.17', PASSWORD,
+                                         self.root / 'owner-key', self.root / 'known-hosts',
+                                         operation or self.operation, old_password=old,
+                                         ssh_factory=lambda *args: ssh, transport_factory=lambda *args: transport)
+        return result, ssh, transport
+
+    def test_guarded_success_has_durable_private_backup_before_password_write(self):
+        operation = self.operation
+        original = self.initial.param
+        class CheckedTransport(FakeTransport):
+            def set_value(inner, dp, value):
+                self.assertEqual((operation / 'param-before.conf').read_bytes(), original)
+                self.assertTrue((operation / 'attempt-started.json').is_file())
+                self.assertEqual(operation.stat().st_mode & 0o777, 0o700)
+                self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in operation.iterdir()))
+                return super().set_value(dp, value)
+        transport = CheckedTransport(statuses=[{'dps': {'237': False, '239': True}},
+                                               {'dps': {'237': False, '239': True}},
+                                               {'dps': {'237': True, '239': True}}],
+                                     writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        result, ssh, _ = self.flow(transport=transport)
+        self.assertTrue(result['configuration_readback_verified'])
+        self.assertFalse(result['normal_boot_verified'] or result['write_replay_allowed'])
+        writes = [call for call in transport.calls if call[0] == 'set']
+        self.assertEqual([call[1] for call in writes], [238, 237])
+        self.assertEqual(json.loads(writes[0][2]), {'oldpwd': OLD_GUARDED, 'newpwd': PASSWORD})
+        self.assertEqual(writes[1], ('set', 237, True))
+        self.assertEqual(ssh.calls, 4)
+        self.assertEqual(json.loads((operation / 'attempt-result.json').read_bytes()), result)
+        self.assertIs(MEDIA.NATIVE_ENABLEMENT_ALLOWED, False)
+
+    def test_preflight_on_one_on_or_listener_on_refuses_before_tuya_and_journal(self):
+        for state in (snapshot(native_param(rtsp=True, onvif=True)), snapshot(native_param(rtsp=True)),
+                      snapshot(native_param(onvif=True)), snapshot(rtsp_listening='1'), snapshot(onvif_listening='1')):
+            factory = mock.Mock()
+            with self.subTest(flags=state.flags), self.assertRaisesRegex(MEDIA.MediaError, 'native_services_must_be_off'):
+                MEDIA.configure_guarded(credentials(), '192.168.88.17', PASSWORD, 'key', 'hosts', self.operation,
+                                         old_password=OLD_GUARDED, ssh_factory=lambda *args: FakeSSH([state]),
+                                         transport_factory=factory)
+            factory.assert_not_called()
+            self.assertFalse(self.operation.exists())
+
+    def test_read_only_preflight_and_old_password_state(self):
+        fake = FakeTransport([{'dps': {'237': False, '239': True}}])
+        result = MEDIA.preflight_guarded(credentials(), '192.168.88.17', PASSWORD, 'key', 'hosts',
+                                         old_password=OLD_GUARDED, ssh_factory=lambda *args: FakeSSH([self.initial]),
+                                         transport_factory=lambda *args: fake)
+        self.assertTrue(result['guarded_preflight_passed'])
+        self.assertFalse(result['configuration_written'])
+        self.assertEqual(fake.calls, [('status',), ('close',)])
+        self.assertFalse(self.operation.exists())
+        for old in (None, '', 'WrongSyntheticAb1'):
+            with self.subTest(old=old), self.assertRaises(MEDIA.MediaError):
+                self.flow(old=old)
+            self.assertFalse(self.operation.exists())
+
+    def test_missing_default_flags_and_passwords_require_authenticated_default_state(self):
+        state = snapshot(b'[dp]\nsiren_onoff=0\n')
+        self.assertEqual(state.flags, {'rtsp': False, 'onvif': False})
+        self.assertEqual(MEDIA.guarded_old_password(state, {'dp237': False, 'dp239': False}, None), 'admin')
+        with self.assertRaises(MEDIA.MediaError):
+            MEDIA.guarded_old_password(state, {'dp237': False, 'dp239': True}, OLD_GUARDED)
+
+    def test_duplicate_malformed_and_reordered_ini(self):
+        reordered = b'[onvif]\nonvif_password=' + OLD_GUARDED.encode() + b'\nonvif_on_off=0\n[rtsp]\nrtsp_password=' + OLD_GUARDED.encode() + b'\nrtsp_on_off=0\n'
+        self.assertEqual(snapshot(reordered).passwords, self.initial.passwords)
+        for param in (native_param() + b'[RTSP]\nother=1\n', native_param() + b'ONVIF_PASSWORD=duplicate\n',
+                      native_param().replace(b'rtsp_on_off=0', b'rtsp_on_off=01'),
+                      native_param() + b'bad assignment\n', native_param() + b'bad=\0\n'):
+            with self.subTest(size=len(param)), self.assertRaises(MEDIA.MediaError):
+                snapshot(param)
+
+    def test_wrong_identity_geometry_writability_and_snapshot_hash_refuse(self):
+        for changes in ({'uid': '1000'}, {'hardware': 'different'}, {'running_app_sha256': '0' * 64},
+                        {'app_sha256': '0' * 64}, {'busybox_sha256': '0' * 64}, {'sd_mount_matches': '0'},
+                        {'config_mount_matches': '0'}, {'sd_visible_dev': '1'}, {'config_device_number': '1f:5'},
+                        {'mtd_writesize': '1'}, {'mtd_type': 'nand'}, {'mtd_oobsize': '16'},
+                        {'config_mode': '666'}, {'config_sha256_after': '0' * 64}):
+            with self.subTest(changes=changes), self.assertRaises(MEDIA.MediaError):
+                snapshot(**changes)
+        frame = snapshot_frame()
+        for data in (frame + b'uid=0\n', frame.replace(b'uid=0\n', b'uid=0\nuid=0\n'), b'not a frame',
+                     frame.replace(b'uid=0\n', b'')):
+            with self.assertRaises(MEDIA.MediaError):
+                MEDIA.parse_ssh_snapshot(data)
+
+    def test_identity_config_or_tuya_race_refuses_before_write(self):
+        for fresh in (snapshot(native_param() + b'; changed bytes\n'), snapshot(stock_start_time='101')):
+            operation = self.root / ('race-' + fresh.sha256[:8] + fresh.metadata['stock_start_time'])
+            fake = FakeTransport([{'dps': {'237': False, '239': True}}])
+            with self.assertRaisesRegex(MEDIA.MediaError, 'live_state_changed_before_write'):
+                self.flow(ssh=FakeSSH([self.initial, fresh]), transport=fake, operation=operation)
+            self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+            self.assertTrue((operation / 'attempt-started.json').exists())
+        fake = FakeTransport([{'dps': {'237': False, '239': True}}, {'dps': {'237': True, '239': True}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'live_state_changed_before_write'):
+            self.flow(ssh=FakeSSH([self.initial, self.initial]), transport=fake)
+        self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+
+    def test_backup_and_attempt_fsync_failures_never_write(self):
+        real_fsync = MEDIA.os.fsync
+        for failed_call in (1, 2, 8, 9):
+            counter = [0]
+            def fsync(descriptor):
+                counter[0] += 1
+                if counter[0] == failed_call:
+                    raise OSError('synthetic private failure ' + PASSWORD + LOCAL_KEY)
+                return real_fsync(descriptor)
+            fake = FakeTransport([{'dps': {'237': False, '239': True}}])
+            with self.subTest(failed_call=failed_call), mock.patch.object(MEDIA.os, 'fsync', side_effect=fsync):
+                with self.assertRaises(MEDIA.MediaError) as caught:
+                    self.flow(transport=fake, operation=self.root / ('fsync-' + str(failed_call)))
+            self.assertEqual(caught.exception.phase, 'preservation')
+            self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+            self.assertNotIn(PASSWORD, str(caught.exception))
+
+    def test_password_rejection_and_mismatched_readback_never_enable(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2,
+                             writes=[{'dps': {'238': '{"res":"failed","errcode":1}'}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'native_password_rejected') as caught:
+            self.flow(transport=fake)
+        self.assertEqual(caught.exception.phase, 'password_confirmation')
+        self.assertNotIn(('set', 237, True), fake.calls)
+        mismatch = native_param(PASSWORD).replace(b'onvif_password=' + PASSWORD.encode(), b'onvif_password=' + OLD_GUARDED.encode())
+        fake = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2,
+                             writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'native_password_readback_failed') as caught:
+            self.flow(ssh=FakeSSH([self.initial, self.initial, snapshot(mismatch)]), transport=fake,
+                      operation=self.root / 'mismatch')
+        self.assertTrue(caught.exception.password_change_acknowledged)
+        self.assertNotIn(('set', 237, True), fake.calls)
+
+    def test_ambiguous_enable_failure_is_journaled_and_cannot_replay(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2,
+                             writes=[{'dps': {'238': '{"res":"ok"}'}}, {'Error': PASSWORD, 'Err': '901'}])
+        with self.assertRaises(MEDIA.MediaError) as caught:
+            self.flow(transport=fake)
+        self.assertEqual(caught.exception.phase, 'media_enable')
+        self.assertTrue(caught.exception.media_enable_attempted and caught.exception.operation_journal_preserved)
+        result = (self.operation / 'attempt-result.json').read_text()
+        for value in (PASSWORD, OLD_GUARDED, LOCAL_KEY, DEVICE_ID):
+            self.assertNotIn(value, result)
+        factory = mock.Mock()
+        with self.assertRaisesRegex(MEDIA.MediaError, 'operation_directory_exists_do_not_replay'):
+            MEDIA.configure_guarded(credentials(), '192.168.88.17', PASSWORD, 'key', 'hosts', self.operation,
+                                     old_password=OLD_GUARDED, ssh_factory=factory)
+        factory.assert_not_called()
+
+    def test_post_enable_partial_flags_fail_without_rollback(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2,
+                             writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'native_configuration_readback_failed') as caught:
+            self.flow(ssh=FakeSSH([self.initial, self.initial, self.changed,
+                                   snapshot(native_param(PASSWORD, True, False))]), transport=fake)
+        self.assertEqual(caught.exception.phase, 'enabled_readback')
+        self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
+
+    def test_guarded_punctuation_and_symlink_operation_refuse_before_provider(self):
+        factory = mock.Mock()
+        for password in ('Ab12!@#$%^&*()', PASSWORD):
+            target = self.operation
+            if password == PASSWORD:
+                target.symlink_to(self.root, target_is_directory=True)
+            with self.subTest(password=password), self.assertRaises(MEDIA.MediaError):
+                MEDIA.configure_guarded(credentials(), '192.168.88.17', password, 'key', 'hosts', target,
+                                         old_password=OLD_GUARDED, ssh_factory=factory)
+        factory.assert_not_called()
+
+    def test_guarded_final_partial_status_is_read_only_bounded_and_not_merged(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2 +
+                             [{'dps': {'237': True}}, {'dps': {'238': '{"res":"ok"}'}},
+                              {'dps': {'237': True, '239': True}}],
+                             writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        result, _, _ = self.flow(transport=fake)
+        self.assertTrue(result['configuration_readback_verified'])
+        self.assertEqual(sum(call == ('status',) for call in fake.calls), 5)
+        self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
+
+
+class SSHProviderTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.key = private_file(self.root / 'key', b'-----BEGIN OPENSSH PRIVATE KEY-----\nSYNTHETIC\n-----END OPENSSH PRIVATE KEY-----\n')
+        blob = b'\0\0\0\x0bssh-ed25519\0\0\0\x20' + bytes(range(32))
+        self.hosts = private_file(self.root / 'known_hosts', b'[192.168.88.17]:2222 ssh-ed25519 ' + base64.b64encode(blob) + b'\n')
+        self.frame = private_file(self.root / 'frame', snapshot_frame())
+        self.args = self.root / 'args'
+        self.stdin = self.root / 'stdin'
+        self.executable = self.root / 'fake-ssh'
+        self.executable.write_text('#!' + os.sys.executable + '\nimport pathlib,sys,json\n' +
+                                  'pathlib.Path(' + repr(str(self.args)) + ').write_text(json.dumps(sys.argv[1:]))\n' +
+                                  'pathlib.Path(' + repr(str(self.stdin)) + ').write_bytes(sys.stdin.buffer.read())\n' +
+                                  'sys.stdout.buffer.write(pathlib.Path(' + repr(str(self.frame)) + ').read_bytes())\n')
+        self.executable.chmod(0o755)
+
+    def provider(self):
+        return MEDIA.SSHProfile('192.168.88.17', self.key, self.hosts, ssh_executable=self.executable)
+
+    def test_actual_subprocess_uses_pinned_key_fixed_read_only_script(self):
+        result = self.provider().snapshot()
+        self.assertFalse(any(result.flags.values()))
+        args = json.loads(self.args.read_text())
+        self.assertEqual(args[:2], ['-F', '/dev/null'])
+        self.assertIn('StrictHostKeyChecking=yes', args)
+        self.assertIn('BatchMode=yes', args)
+        self.assertIn('ClearAllForwardings=yes', args)
+        self.assertIn('PasswordAuthentication=no', args)
+        self.assertIn('GlobalKnownHostsFile=/dev/null', args)
+        self.assertEqual(args[-3:], ['root@192.168.88.17', '/bin/sh', '-s'])
+        self.assertEqual(self.stdin.read_bytes(), MEDIA.SSH_SNAPSHOT_SCRIPT.encode())
+        for value in (PASSWORD, OLD_GUARDED, LOCAL_KEY, DEVICE_ID):
+            self.assertNotIn(value, self.stdin.read_text())
+
+    def test_known_hosts_filename_spaces_are_quoted_and_expansions_refused(self):
+        spaced = private_file(self.root / 'known hosts', self.hosts.read_bytes())
+        provider = MEDIA.SSHProfile('192.168.88.17', self.key, spaced, ssh_executable=self.executable)
+        provider.snapshot()
+        self.assertIn('UserKnownHostsFile="' + str(spaced) + '"', json.loads(self.args.read_text()))
+        expansion = private_file(self.root / 'known-%h', self.hosts.read_bytes())
+        with self.assertRaisesRegex(MEDIA.MediaError, 'unsupported_ssh_input_path'):
+            MEDIA.SSHProfile('192.168.88.17', self.key, expansion, ssh_executable=self.executable)
+
+    def test_bad_host_pin_permissions_changed_inputs_and_symlink_refuse(self):
+        original = self.hosts.read_bytes()
+        for data in (original.replace(b'192.168.88.17', b'192.168.88.18'), original + original,
+                     original.replace(b'[192.168.88.17]:2222', b'*')):
+            self.hosts.write_bytes(data)
+            with self.assertRaises(MEDIA.MediaError):
+                self.provider()
+        self.hosts.write_bytes(original)
+        provider = self.provider()
+        self.hosts.write_bytes(original + b'# changed\n')
+        with self.assertRaisesRegex(MEDIA.MediaError, 'ssh_authentication_files_changed'):
+            provider.snapshot()
+        self.hosts.write_bytes(original);self.hosts.chmod(0o644)
+        with self.assertRaises(MEDIA.MediaError):
+            self.provider()
+        self.assertFalse(self.args.exists())
+
+    def test_subprocess_timeout_oversize_and_invalid_output_are_fixed_errors(self):
+        self.frame.write_bytes(b'x' * (MEDIA.SSH_OUTPUT_LIMIT + 1))
+        with self.assertRaisesRegex(MEDIA.MediaError, 'ssh_snapshot_failed'):
+            self.provider().snapshot()
+        self.frame.write_bytes(b'invalid ' + PASSWORD.encode())
+        with self.assertRaisesRegex(MEDIA.MediaError, 'invalid_ssh_snapshot'):
+            self.provider().snapshot()
+        self.executable.write_text('#!' + os.sys.executable + '\nimport time\ntime.sleep(2)\n')
+        started = time.monotonic()
+        with mock.patch.object(MEDIA, 'SSH_READ_TIMEOUT', 0.1), self.assertRaisesRegex(MEDIA.MediaError, 'ssh_snapshot_failed'):
+            self.provider().snapshot()
+        self.assertLess(time.monotonic() - started, 1.5)
+
+    def test_preflight_cli_actual_provider_on_camera_refuses_without_tuya_or_output_secrets(self):
+        self.frame.write_bytes(snapshot_frame(native_param(PASSWORD, True, True),
+                                              rtsp_listening='1', onvif_listening='1'))
+        identity = private_file(self.root / 'credentials', json.dumps(credentials()).encode())
+        password = private_file(self.root / 'new-password', PASSWORD.encode())
+        old = private_file(self.root / 'old-password', OLD_GUARDED.encode())
+        output = io.StringIO()
+        with mock.patch.object(MEDIA.shutil, 'which', return_value=str(self.executable)), \
+                mock.patch.object(MEDIA, 'TuyaTransport') as factory, contextlib.redirect_stdout(output):
+            code = MEDIA.main(['preflight-guarded', '--credentials', str(identity), '--host', '192.168.88.17',
+                               '--password-file', str(password), '--old-password-file', str(old),
+                               '--ssh-key', str(self.key), '--ssh-known-hosts', str(self.hosts)])
+        self.assertEqual(code, 1)
+        result = json.loads(output.getvalue())
+        self.assertEqual((result['error'], result['phase']), ('native_services_must_be_off', 'ssh_preflight'))
+        self.assertFalse(result['password_change_acknowledged'] or result['media_enable_attempted'])
+        factory.assert_not_called()
+        for value in (PASSWORD, OLD_GUARDED, LOCAL_KEY, DEVICE_ID):
+            self.assertNotIn(value, output.getvalue())
 
 
 class SafetyPolicyTests(unittest.TestCase):

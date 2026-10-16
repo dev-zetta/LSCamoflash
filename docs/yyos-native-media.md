@@ -1,8 +1,8 @@
 # YYOS native RTSP and ONVIF investigation
 
-**Native RTSP/ONVIF with a 15-byte password passed short normal-cold-boot checks on this exact camera. Public configuration remains blocked; do not bypass the gate.** Recovery, the controlled trial and subsequent native-enabled normal startup are recorded separately below. Key-only SSH, HTTP management, native authentication/decoding and owner-reported Tuya app connectivity passed short checks. Recorded microphone sound was accepted before that boot; direct VLC live playback, detailed app/recording behavior, repeated-boot endurance and long-term stability remain unresolved. No public activation recipe is provided.
+**Native RTSP/ONVIF with a 15-byte password passed short normal-cold-boot checks on this exact camera. Legacy unguarded configuration remains blocked. A new explicit SSH-guarded path is under validation.** Recovery, the controlled trial and subsequent native-enabled normal startup are recorded separately below. Key-only SSH, HTTP management, native authentication/decoding and owner-reported Tuya app connectivity passed short checks. Recorded microphone sound was accepted before that boot; direct VLC live playback, detailed app/recording behavior, repeated-boot endurance and long-term stability remain unresolved. The guarded implementation has offline checks and a live refusal check; its write path has not yet been accepted on a camera.
 
-The host-side [native-media helper](../tools/yyos/native-media.py) targets only the backed-up **LSC 3225722 / SZ F26312 / V14.1.5** profile and exact `yy_cam` identity in the [camera guide](camera-3225722.md). Its production `configure` path remains disabled by `NATIVE_ENABLEMENT_ALLOWED = False` and returns **`native_enablement_blocked_boot_loop` before opening a transport**. This remaining write-path safeguard is separate from the current unit's short native-runtime acceptance. Offline credential recovery and read-only status remain available.
+The host-side [native-media helper](../tools/yyos/native-media.py) targets only the backed-up **LSC 3225722 / SZ F26312 / V14.1.5** profile and exact `yy_cam` identity in the [camera guide](camera-3225722.md). Its production `configure` path remains disabled by `NATIVE_ENABLEMENT_ALLOWED = False` and returns **`native_enablement_blocked_boot_loop` before opening a transport**. The separate `preflight-guarded` and `configure-guarded` commands require fresh pinned SSH identity and independent configuration checks. Their validation is described below. Offline credential recovery and read-only status remain available.
 
 The helper is separate from the [read-only management dashboard](yyos-management.md) and [optional key-only SSH](yyos-ssh.md). Dashboard credentials do not protect native RTSP or ONVIF. The native services' expected stock username is **`admin`**; there is no default password supplied by this project. Earlier pre-failure HTTP checks and the later normal-boot acceptance are distinct observations.
 
@@ -46,11 +46,11 @@ Before the failing configuration attempt, the actual read-only result was **`dp2
 
 The status interface accepts `--timeout` from 1 to 10 seconds, default 3, and `--retries` from 0 to 2 additional connection attempts, default 0. These bounds do not authorize configuration writes. Credential material, raw status payloads and exception details are suppressed in normal CLI output; failures return fixed error codes and, when available, a bounded native error number.
 
-## Why configuration is disabled
+## Why legacy configuration is disabled
 
 The blocked implementation requests a persistent native password change through DP238, requires an exact successful acknowledgement, then requests DP237 enablement and checks fresh status. The original 24-byte-password attempt did not return a reliable final status and was followed by repeated reboots. Recovery established that both configuration enable flags were 1 before changing them to 0 while preserving password bytes. The later 15-byte trial and normal startup passed short runtime checks, but they do not establish the exact earlier reboot cause.
 
-The public write path remains blocked because it can rotate a password while native services are enabled, DP237 alone does not verify both enable flags, and the LAN configuration operation does not freshly verify the running application binary. These remaining safeguards require implementation and review before public configuration can be enabled. No executable activation recipe is provided.
+The legacy write path remains blocked because it can rotate a password while native services are enabled, DP237 alone does not verify both enable flags, and that operation does not freshly verify the running application binary. The new explicit guarded path addresses these checks separately; do not edit the legacy gate.
 
 Independent static review confirmed that this exact stock binary copies native RTSP and ONVIF passwords into **16-byte caches with unbounded `strcpy`**. Both password values in the preserved pre-recovery configuration were **24 bytes**, exceeding those caches including the terminating NUL. Later overlapping copies and forward-copy libc behavior provide a strong crash candidate. No captured crash program counter proves that this was the actual reboot path, so physical causality remains unconfirmed.
 
@@ -60,9 +60,25 @@ Later diagnostic errors can include fixed `phase`, `password_change_acknowledged
 
 The exact trial endpoints were `rtsp://<camera-ip>:8554/stream0`, `rtsp://<camera-ip>:8554/stream1` and `http://<camera-ip>:5000/onvif/device_service`; their short authentication/decoding observations are recorded below. The separate [guarded recovery tool](yyos-recovery.md) passed 45 offline checks/review, the short physical recovery boot and private output verification. One native-off normal-bootstrap cold boot also passed short checks; the linked guide describes the bounded evidence without a generic deployment recipe.
 
-## Current validation
+## Explicit SSH-guarded configuration
 
-The helper passed **37 focused offline tests**, including the 15-byte new-password ceiling, production block before transport, bounded final-status queries, verifier chain, secret-free output and synthetic protocol/write-order fixtures. The public gate remains false. The controlled trial and subsequent native-enabled normal boot below establish short observations only. Recorded microphone sound was accepted by the owner before that boot, and the owner confirmed Tuya app connectivity while SSH/local streams ran; detailed app functionality and long-term use remain unverified. The [verified NOR backup](camera-3225722.md#observed-nor-geometry) still does not establish atomic capture, whole-chip coverage or restoration.
+`preflight-guarded` is read-only. It requires the owner client private key and a dedicated exact Ed25519 host pin for TCP2222, checks the live CPU, running application hash, stock PID/start time, actual SD/configuration mounts and NOR geometry, and privately reads a bounded configuration snapshot. Both actual RTSP/ONVIF flags must already be off and both listeners absent. Authenticated Tuya status and the supplied old password must agree with that snapshot. The check refuses an enabled camera; it never disables services itself.
+
+```sh
+"$PYTHON" tools/yyos/native-media.py preflight-guarded \
+  --credentials /absolute/private/path/yyos-native-credentials.json \
+  --host "$CAMERA_IP" \
+  --password-file /absolute/private/path/new-native-password.txt \
+  --old-password-file /absolute/private/path/current-native-password.txt \
+  --ssh-key /absolute/private/path/owner_ssh_ed25519 \
+  --ssh-known-hosts /absolute/private/path/camera-known-hosts
+```
+
+New guarded passwords must be **8–15 ASCII letters and digits**, including uppercase, lowercase and a digit. Omit the old-password file only for the verified stock default-password state. The SSH key and host pin must be private regular host files; SSH ignores user configuration, disables forwarding/password methods and uses strict host-key checking.
+
+`configure-guarded` accepts the same arguments plus `--operation-directory /absolute/private/path/new-operation-directory`. It exclusively creates a mode0700 journal, preserves the original configuration with mode0600 and checked file/directory flushes, then rechecks the entire live configuration hash and identity immediately before one password request. It requires an exact acknowledgement and a fresh readback of both passwords with both services still off before one enable request. Final success requires fresh configuration and complete authenticated status. Existing operation directories always refuse replay. Ambiguous writes are never automatically retried or rolled back; retain the journal and use read-only checks before deciding on a separate recovery action.
+
+**The new guarded write path has not yet passed a physical configuration trial.** Its 55 focused offline tests passed, including malformed/duplicate configuration, active flags/listeners, identity/configuration races, preservation failures, ambiguous acknowledgements and replay refusal. The fixed snapshot script passed ARM926 shell syntax checks. A live `preflight-guarded` against the already enabled camera returned `native_services_must_be_off` before any Tuya transport or configuration write. This verifies the enabled-state refusal, not the off-state write sequence. The legacy `configure` gate remains false.
 
 ## Guarded 15-byte trial: bounded acceptance
 
