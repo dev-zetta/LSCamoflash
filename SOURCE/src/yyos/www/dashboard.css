@@ -531,3 +531,8 @@ footer {
 .recording-label small { display: block; color: var(--muted); }
 .recordings-list .row-actions { flex-wrap: wrap; }
 @media(max-width:600px) { .recordings-list li { align-items: flex-start; flex-direction: column; } }
+
+.jog-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 160px)); gap: 10px; justify-content: center; margin: 20px 0; }
+#control-up { grid-column: 2; }
+#control-left { grid-column: 1; }
+#control-down { grid-column: 2; }

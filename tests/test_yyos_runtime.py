@@ -33,6 +33,8 @@ class RuntimeTests(unittest.TestCase):
         self.card.mkdir()
         self.kit = self.card / 'LSCamoflash-yyos'
         shutil.copytree(SOURCE, self.kit)
+        # This baseline models the optional read-only kit without controls helpers.
+        (self.kit / "www/cgi-bin/controls.cgi").unlink(missing_ok=True)
         (self.kit / 'bin').mkdir()
         shutil.copyfile(shutil.which('busybox'), self.kit / 'bin/busybox')
         (self.kit / 'bin/busybox').chmod(0o755)

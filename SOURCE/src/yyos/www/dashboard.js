@@ -1,6 +1,6 @@
 'use strict';
 (function (root) {
-  const TABS = ['dashboard', 'streams', 'recordings', 'diagnostics'];
+  const TABS = ['dashboard', 'streams', 'controls', 'recordings', 'diagnostics'];
   function number(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER ? value : null; }
   function mib(value) { return number(value) === null ? 'Not reported' : (value / 1024).toFixed(1) + ' MiB'; }
   function duration(value) {
@@ -49,10 +49,22 @@
     });
     return {kind: kind, entries: data[key], next: data.next_offset, truncated: data.scan_truncated};
   }
+  function controlStatus(data) {
+    if (!data || data.ok !== true || typeof data.configured !== 'boolean') throw new Error('Invalid control status.');
+    if (data.configured && ['indicator', 'timestamp_osd', 'tracking'].some(key => typeof data[key] !== 'boolean')) throw new Error('Invalid control status.');
+    return data;
+  }
+  function controlRequest(action, value) {
+    if (['indicator', 'timestamp_osd'].includes(action) && typeof value === 'boolean') return {action: action, value: value};
+    if (action === 'jog' && ['up', 'right', 'down', 'left'].includes(value)) return {action: action, direction: value};
+    if (action === 'stop' && value === undefined) return {action: action};
+    throw new Error('Unsupported control action.');
+  }
   function createApp(doc, fetcher, timers) {
     timers = timers || root;
     const el = id => doc.getElementById(id), text = (id, value) => { el(id).textContent = value; };
     let busy = false, interval = null;
+    let controlsBusy = false, controlsLoaded = false, controlsProvisioned = false, controlsState = null;
     let recordingsBusy = false, recordingsLoaded = false, recordingDay = '', recordingSession = '', recordingOffset = 0, recordingNext = null;
     function link(id, value) { text(id, value || 'Candidate address unavailable'); if (value) el(id).setAttribute('href', value); else el(id).removeAttribute('href'); }
     function meter(id, value) { el(id).hidden = value === null; el(id).value = value === null ? 0 : value; }
@@ -136,8 +148,55 @@
         el('recordings-previous').disabled = recordingOffset === 0; el('recordings-next').disabled = recordingNext === null;
       }
     }
+    function controlButtons() {
+      const enabled = !!(controlsState && controlsState.configured && !controlsBusy);
+      ['control-indicator', 'control-timestamp-osd'].forEach(id => { el(id).disabled = !enabled; });
+      ['up', 'right', 'down', 'left'].forEach(direction => { el('control-' + direction).disabled = !enabled || controlsState.tracking !== false; });
+      el('control-stop').disabled = controlsBusy || !controlsProvisioned;
+      el('refresh-controls').disabled = controlsBusy;
+    }
+    function renderControls(data) {
+      controlsState = controlStatus(data); controlsProvisioned = data.configured; controlsLoaded = true;
+      text('controls-state', data.configured ? 'Authenticated stock controls are available.' : 'Controls are not configured. Provision the private native LAN key separately.');
+      text('control-indicator-state', data.configured ? (data.indicator ? 'On' : 'Off') : 'Not configured');
+      text('control-osd-state', data.configured ? (data.timestamp_osd ? 'On' : 'Off') : 'Not configured');
+      text('control-indicator', data.configured && data.indicator ? 'Turn indicator off' : 'Turn indicator on');
+      text('control-timestamp-osd', data.configured && data.timestamp_osd ? 'Hide timestamp' : 'Show timestamp');
+      text('control-tracking-state', !data.configured ? 'Steps are unavailable until controls are configured.' : data.tracking ? 'Motion tracking is on. Turn it off in the stock app before stepping.' : 'Motion tracking is off. Cardinal steps are available.');
+      controlButtons();
+    }
+    async function refreshControls() {
+      if (controlsBusy) return;
+      controlsBusy = true; controlButtons(); el('controls-error').hidden = true;
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const deadline = controller ? timers.setTimeout(() => controller.abort(), 35000) : null;
+      try {
+        const response = await fetcher('cgi-bin/controls.cgi', {cache: 'no-store', credentials: 'same-origin', signal: controller ? controller.signal : undefined});
+        if (!response.ok) throw new Error('Control status is unavailable (' + response.status + ').');
+        renderControls(await response.json());
+      } catch (error) { controlsState = null; text('controls-error', error.name === 'AbortError' ? 'The control status request timed out.' : error.message); el('controls-error').hidden = false; text('controls-state', 'Control status is unavailable. No action was requested.'); }
+      finally { if (deadline !== null) timers.clearTimeout(deadline); controlsBusy = false; controlButtons(); }
+    }
+    async function sendControl(action, value) {
+      if (controlsBusy || (action === 'stop' ? !controlsProvisioned : (!controlsState || !controlsState.configured)) || (action === 'jog' && controlsState.tracking !== false)) return;
+      const request = controlRequest(action, value);
+      controlsBusy = true; controlButtons(); el('controls-error').hidden = true;
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const deadline = controller ? timers.setTimeout(() => controller.abort(), 35000) : null;
+      let refresh = false;
+      try {
+        const response = await fetcher('cgi-bin/controls.cgi', {method: 'POST', cache: 'no-store', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-LSCamoflash-Request': 'controls-v1'}, body: JSON.stringify(request), signal: controller ? controller.signal : undefined});
+        if (!response.ok) throw new Error('The control operation could not be confirmed (' + response.status + '). No write will be retried.');
+        const data = await response.json();
+        if (!data || data.ok !== true || data.configured !== true || data.action !== action || (action === 'jog' && (data.jog_ms !== 200 || data.stop_acknowledged !== true || data.physical_hard_deadline_proven !== false)) || (action === 'stop' && data.stop_acknowledged !== true) || (['indicator', 'timestamp_osd'].includes(action) && (data.value !== value || data.readback_verified !== true))) throw new Error('The control acknowledgment was incomplete. No write will be retried.');
+        text('controls-state', action === 'jog' ? 'One step completed; software stop acknowledged.' : action === 'stop' ? 'Software stop acknowledged.' : 'Setting readback verified.'); refresh = true;
+      } catch (error) { controlsState = null; text('controls-error', error.name === 'AbortError' ? 'The operation timed out. Its result is unknown; no write will be retried.' : error.message); el('controls-error').hidden = false; }
+      finally { if (deadline !== null) timers.clearTimeout(deadline); controlsBusy = false; controlButtons(); }
+      if (refresh) await refreshControls();
+    }
     function showTab(name) {
       if (!TABS.includes(name)) return;
+      if (name === 'controls' && !controlsLoaded) refreshControls();
       if (name === 'recordings' && !recordingsLoaded) loadRecordings('', '', 0);
       TABS.forEach(tab => { const selected = tab === name; el('panel-' + tab).hidden = !selected; el('tab-' + tab).className = selected ? 'tab active' : 'tab'; el('tab-' + tab).setAttribute('aria-selected', String(selected)); el('tab-' + tab).tabIndex = selected ? 0 : -1; });
     }
@@ -150,6 +209,15 @@
         });
       });
       el('refresh-status').addEventListener('click', refreshStatus);
+      el('refresh-controls').addEventListener('click', refreshControls);
+      el('control-indicator').addEventListener('click', () => { if (controlsState) sendControl('indicator', !controlsState.indicator); });
+      el('control-timestamp-osd').addEventListener('click', () => { if (controlsState) sendControl('timestamp_osd', !controlsState.timestamp_osd); });
+      ['up', 'right', 'down', 'left'].forEach(direction => {
+        const button = el('control-' + direction);
+        button.addEventListener('click', event => { if (event.detail > 1) return; sendControl('jog', direction); });
+        button.addEventListener('keydown', event => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); });
+      });
+      el('control-stop').addEventListener('click', () => sendControl('stop'));
       el('refresh-recordings').addEventListener('click', () => loadRecordings(recordingDay, recordingSession, recordingOffset));
       el('recordings-root').addEventListener('click', () => loadRecordings('', '', 0));
       el('recordings-up').addEventListener('click', () => loadRecordings(recordingSession ? recordingDay : '', '', 0));
@@ -158,9 +226,9 @@
       interval = timers.setInterval(() => { if (!doc.hidden) refreshStatus(); }, 15000);
       return refreshStatus();
     }
-    return {initialize: initialize, refreshStatus: refreshStatus, renderStatus: renderStatus, showTab: showTab, loadRecordings: loadRecordings, destroy: () => { if (interval !== null) timers.clearInterval(interval); }};
+    return {initialize: initialize, refreshStatus: refreshStatus, renderStatus: renderStatus, showTab: showTab, refreshControls: refreshControls, sendControl: sendControl, renderControls: renderControls, loadRecordings: loadRecordings, destroy: () => { if (interval !== null) timers.clearInterval(interval); }};
   }
-  const api = {mib: mib, memoryValues: memoryValues, streamURL: streamURL, serviceURL: serviceURL, recordingURL: recordingURL, recordingPage: recordingPage, createApp: createApp};
+  const api = {mib: mib, memoryValues: memoryValues, streamURL: streamURL, serviceURL: serviceURL, recordingURL: recordingURL, recordingPage: recordingPage, controlStatus: controlStatus, controlRequest: controlRequest, createApp: createApp};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document !== 'undefined' && typeof root.fetch === 'function') createApp(document, root.fetch.bind(root), root).initialize();
 })(typeof globalThis !== 'undefined' ? globalThis : window);

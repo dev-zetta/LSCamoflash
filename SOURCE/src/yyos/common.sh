@@ -1,5 +1,5 @@
 #!/bin/sh
-# Dedicated YYOS read-only management profile. These constants are not environment overrides.
+# Dedicated YYOS management profile. These constants are not environment overrides.
 ROOT="/mnt/sdcard/LSCamoflash-yyos"
 CARD_MOUNT="/mnt/sdcard"
 MMC="/dev/mmcblk0p1"
@@ -57,8 +57,30 @@ trusted_mount() {
     done < "$MOUNTS"
     [ "$matching" = 1 ] && [ "$writable" = 1 ]
 }
-PAYLOAD_FILES="start.sh stop.sh common.sh README.md bin/busybox bin/yyos-recordings www/index.html www/dashboard.js www/dashboard.css www/cgi-bin/status.cgi www/cgi-bin/recordings.cgi LICENSE.MIT COPYING.BusyBox manifest.json"
+BASE_PAYLOAD_FILES="start.sh stop.sh common.sh README.md bin/busybox bin/yyos-recordings www/index.html www/dashboard.js www/dashboard.css www/cgi-bin/status.cgi www/cgi-bin/recordings.cgi LICENSE.MIT COPYING.BusyBox manifest.json"
+PAYLOAD_FILES="$BASE_PAYLOAD_FILES"
+CONTROL_FILES="bin/yyos-controls bin/yyos-controls-cgi COPYING.Controls controls-provenance.json www/cgi-bin/controls.cgi"
+control_key() {
+    regular "$ROOT/native-control.key" || return 1
+    links=$(tool stat -c %h "$ROOT/native-control.key") || return 1
+    [ "$links" = 1 ] || return 1
+    bytes=$(tool stat -c %s "$ROOT/native-control.key") || return 1
+    case "$bytes" in 16|17) ;; *) return 1;; esac
+    # Exactly 16 non-space printable ASCII bytes, optionally followed by LF.
+    # AWK emits nothing: key material never reaches stdout, logs or checksums.
+    LC_ALL=C tool awk 'NR==1 {if(length($0)!=16 || $0~/[^!-~]/)bad=1}
+        END {exit bad || NR!=1}' "$ROOT/native-control.key"
+}
 verify_payload() {
+    PAYLOAD_FILES="$BASE_PAYLOAD_FILES"
+    controls_present=0
+    for relative in $CONTROL_FILES; do
+        if [ -e "$ROOT/$relative" ] || [ -L "$ROOT/$relative" ]; then controls_present=1; fi
+    done
+    if [ "$controls_present" = 1 ]; then PAYLOAD_FILES="$PAYLOAD_FILES $CONTROL_FILES"; fi
+    if [ -e "$ROOT/native-control.key" ] || [ -L "$ROOT/native-control.key" ]; then
+        control_key || return 1
+    fi
     regular "$ROOT/SHA256SUMS" || return 1
     for relative in $PAYLOAD_FILES; do regular "$ROOT/$relative" || return 1; done
     paths=$(tool find "$ROOT" -mindepth 1) || return 1
@@ -69,7 +91,7 @@ verify_payload() {
             case "$relative" in bin|www|www/cgi-bin) ;; *) return 1;; esac
         else
             regular "$path" || return 1
-            case " $PAYLOAD_FILES SHA256SUMS httpd.conf startup.log " in *" $relative "*) ;; *) return 1;; esac
+            case " $PAYLOAD_FILES SHA256SUMS httpd.conf native-control.key startup.log " in *" $relative "*) ;; *) return 1;; esac
         fi
     done
     tool awk -v files="$PAYLOAD_FILES" '

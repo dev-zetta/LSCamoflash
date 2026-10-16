@@ -40,6 +40,13 @@ if http_running; then
     management=true
     management_rss=$(tool awk '$1=="VmRSS:" && $2~/^[0-9]+$/ && $2+0<=9007199254740991 && $3=="kB" {print $2;exit}' "$PROC/$owner_pid/status" 2>/dev/null)
 fi
+# Installed helpers and private provisioning are separate capabilities. A
+# partial/tampered payload or absent/invalid key never advertises writable APIs.
+controls_included=false;controls_configured=false;controls_jog_ms=null
+if verify_payload && [ "$controls_present" = 1 ]; then
+    controls_included=true;controls_jog_ms=200
+    if control_key; then controls_configured=true; fi
+fi
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n'
 [ "$REQUEST_METHOD" != HEAD ] || exit 0
-printf '{"backend":"yyos-stock","model":"LSC 3225722 / SZ F26312","firmware":"V14.1.5 experimental","ip":"%s","uptime_seconds":%s,"memory":%s,"cpu":%s,"storage":%s,"services":{"stock_app":%s,"management":%s,"native_rtsp_listening":%s,"native_onvif_listening":%s},"diagnostics":{"management_rss_kB":%s,"stock_app_rss_kB":%s},"streams":{"main_candidate":"rtsp://%s:8554/stream0","sub_candidate":"rtsp://%s:8554/stream1","verified":false,"audio":"unverified","authentication":"unverified"},"onvif":{"candidate_url":"http://%s:5000/onvif/device_service","verified":false,"authentication":"unverified"},"stock_app_managed":false,"settings_write":false,"network_write":false,"recordings":{"read_only":true,"format":"yyos-v5-media","playback":false},"ptz":false,"reboot":false,"firmware_update":false}\n' "$ip" "${uptime:-0}" "$memory" "$cpu" "$storage" "$stock_app" "$management" "$rtsp" "$onvif" "${management_rss:-0}" "${stock_rss:-0}" "$ip" "$ip" "$ip"
+printf '{"backend":"yyos-stock","model":"LSC 3225722 / SZ F26312","firmware":"V14.1.5 experimental","ip":"%s","uptime_seconds":%s,"memory":%s,"cpu":%s,"storage":%s,"services":{"stock_app":%s,"management":%s,"native_rtsp_listening":%s,"native_onvif_listening":%s},"diagnostics":{"management_rss_kB":%s,"stock_app_rss_kB":%s},"streams":{"main_candidate":"rtsp://%s:8554/stream0","sub_candidate":"rtsp://%s:8554/stream1","verified":false,"audio":"unverified","authentication":"unverified"},"onvif":{"candidate_url":"http://%s:5000/onvif/device_service","verified":false,"authentication":"unverified"},"stock_app_managed":false,"settings_write":%s,"network_write":false,"recordings":{"read_only":true,"format":"yyos-v5-media","playback":false},"controls":{"included":%s,"configured":%s,"jog_ms":%s},"ptz":%s,"reboot":false,"firmware_update":false}\n' "$ip" "${uptime:-0}" "$memory" "$cpu" "$storage" "$stock_app" "$management" "$rtsp" "$onvif" "${management_rss:-0}" "${stock_rss:-0}" "$ip" "$ip" "$ip" "$controls_configured" "$controls_included" "$controls_configured" "$controls_jog_ms" "$controls_configured"
