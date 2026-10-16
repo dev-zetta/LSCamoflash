@@ -114,11 +114,11 @@ def build(args):
         (stage / 'manifest.json').write_text(json.dumps(package, indent=2, sort_keys=True) + '\n')
         (stage / 'README.md').write_text(
             '# YYOS management boot kit\n\n'
-            '**Known reboot-loop block: do not enable native RTSP/ONVIF or bypass the production configuration gate.** '
-            'Repeated reboots were confirmed after an approved 24-byte-password attempt. '
-            'Native enablement remains blocked before transport. Recovery and one native-off normal cold boot passed short verification. '
-            'A separate controlled 15-byte trial passed short TCP/UDP decoding, RTSP Digest and ONVIF WSSE checks. '
-            'Native-enabled normal cold boot, owner app checks and long-term stability remain pending; recorded microphone sound was accepted by the owner; the exact reboot cause is unproven. New UI/payload deployment is separate. '
+            '**Short native-enabled normal-boot checks passed; public native configuration remains blocked. Do not bypass the gate.** '
+            'The earlier 24-byte-password reboot loop, verified recovery and controlled 15-byte trial remain documented separately. '
+            'Authenticated HTTP, key-only SSH, native decoding, RTSP Digest and ONVIF WSSE passed short live checks alongside owner-reported Tuya app connectivity. '
+            'Recorded microphone sound was accepted before that boot; post-boot audio decoded with zero samples. '
+            'Remaining write-path safeguards keep public configuration blocked. The earlier crash cause is unproven; direct VLC live playback, detailed app/recording behavior, repeated boots and long-term stability remain unresolved. New UI/payload deployment is separate. '
             'See https://github.com/dev-zetta/LSCamoflash/blob/main/docs/yyos-recovery.md. '
             'This kit is not a recovery procedure.\n\n'
             'Experimental exact-profile management for 3225722 / SZ F26312 / V14.1.5. '
