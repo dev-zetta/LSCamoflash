@@ -24,6 +24,7 @@ EXTRACT_LIMIT = 32 * 1024 * 1024
 MEMBER_LIMIT = 2000
 CONFIG_NAME = "dropbear-localoptions.h"
 CONFIG_SHA256 = "972166708b2793d1090f15a668d9afe9ad3aa6f358539bb3c3d91992edfcf745"
+CLOCK_COMPAT_SHA256 = "f3f3c87472abbaf78756f8245416b980b63e2e733b2c95072c5a71a2a5514655"
 CONFIGURE_FLAGS = [
     "--host=arm-buildroot-linux-uclibcgnueabi", "--enable-static",
     "--disable-zlib", "--disable-syslog", "--disable-shadow",
@@ -91,9 +92,12 @@ def unpack_source(archive: Path, destination: Path) -> Path:
 
 
 def run_logged(command: list[str], cwd: Path, log: Path, timeout: int) -> None:
+    environment = os.environ.copy()
+    for name in ("REALGCC", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "LIBRARY_PATH"):
+        environment.pop(name, None)
     with log.open("xb") as stream:
         child = subprocess.Popen(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT,
-                                 stdin=subprocess.DEVNULL, start_new_session=True)
+                                 stdin=subprocess.DEVNULL, start_new_session=True, env=environment)
         try:
             code = child.wait(timeout=timeout)
         except BaseException:
@@ -143,6 +147,78 @@ def license_bundle(source: Path, output: Path) -> None:
     output.write_text("\n\n".join(chunks) + "\n")
 
 
+def validate_musl(root: Path) -> tuple[Path, dict]:
+    """Accept a complete pinned builder output, not an arbitrary compiler override."""
+    if any(p.is_symlink() for p in (root, *root.parents)):
+        raise ValueError("musl build must not contain symlink ancestors")
+    path = root / "provenance.json"
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 1024 * 1024:
+        raise ValueError("bounded regular musl provenance required")
+    proof = json.loads(path.read_text())
+    archive = root / "musl-1.2.6.tar.gz"
+    pinned = "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a"
+    if (proof.get("schema") != 1 or proof.get("name") != "musl" or proof.get("version") != "1.2.6"
+            or proof.get("source_archive_sha256") != pinned or not proof.get("qemu", {}).get("passed")
+            or archive.is_symlink() or digest(archive) != pinned):
+        raise ValueError("pinned ARM926-tested musl build required")
+    files = proof.get("install_files", {})
+    if not isinstance(files, dict) or len(files) > 1000 or not {
+            "bin/musl-gcc", "lib/libc.a", "lib/crt1.o", "include/stdio.h"} <= files.keys():
+        raise ValueError("musl installation inventory is incomplete")
+    actual = set()
+    for index, item in enumerate((root / "install").rglob("*")):
+        if index >= 2000 or item.is_symlink() or not (item.is_dir() or item.is_file()):
+            raise ValueError("unexpected musl installation entry")
+        if item.is_file():
+            actual.add(item.relative_to(root / "install").as_posix())
+    if actual != set(files):
+        raise ValueError("musl installation contains unproven or missing files")
+    for name, expected in files.items():
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise ValueError("unsafe musl installation inventory")
+        item = root / "install" / name
+        if (any(p.is_symlink() for p in (item, *item.parents)) or not item.is_file()
+                or digest(item) != expected):
+            raise ValueError("musl installation differs from build provenance")
+    for name, expected in {"COPYING.musl": proof.get("license_sha256"),
+                           **proof.get("gcc_runtime_notices", {})}.items():
+        if name not in {"COPYING.musl", "GCC-COPYING3", "GCC-COPYING.RUNTIME"}:
+            raise ValueError("unexpected libc license filename")
+        item = root / name
+        if item.is_symlink() or not item.is_file() or digest(item) != expected:
+            raise ValueError("libc license differs from build provenance")
+    if set(proof.get("gcc_runtime_notices", {})) != {"GCC-COPYING3", "GCC-COPYING.RUNTIME"}:
+        raise ValueError("GCC runtime license notices missing")
+    return root / "install/bin/musl-gcc", {
+        "name": "musl", "version": "1.2.6", "source_archive_sha256": pinned,
+        "license_sha256": proof["license_sha256"], "provenance_sha256": digest(path),
+        "gcc_runtime_notices": proof["gcc_runtime_notices"],
+    }
+
+
+def patch_clock_fallback(source: Path) -> dict:
+    """The musl YYOS build must fail closed if its monotonic clock is unavailable."""
+    path = source / "src/dbutil.c"
+    text = path.read_text()
+    original = digest(path)
+    anchor = "void gettime_wrapper(struct timespec *now) {\n\tstruct timeval tv;\n"
+    if text.count(anchor) != 1:
+        raise ValueError("unexpected upstream clock wrapper")
+    addition = '''#if defined(LSCAMOFLASH_YYOS_CLOCK_COMPAT)
+    /* The exact YYOS kernel has broken time64 stubs. Never fall back to a
+     * time32 syscall into a libc time64 struct, or to wall-clock deadlines. */
+    if (clock_gettime(CLOCK_MONOTONIC, now) != 0 || now->tv_sec < 0
+            || now->tv_nsec < 0 || now->tv_nsec >= 1000000000)
+        dropbear_exit("YYOS monotonic clock unavailable");
+    return;
+#endif
+'''
+    path.write_text(text.replace(anchor, anchor + addition))
+    return {"file": "src/dbutil.c", "original_sha256": original,
+            "patched_sha256": digest(path), "monotonic_failure": "exit, no raw or wall-clock fallback"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path,
@@ -153,6 +229,7 @@ def main() -> int:
     parser.add_argument("--qemu", type=Path, help="qemu-arm for ARM926 smoke checks")
     parser.add_argument("--skip-qemu", action="store_true", help="build only; provenance explicitly records untested emulation")
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--musl-build", type=Path, help="complete build-musl.py output for a redistributable static musl server")
     args = parser.parse_args()
     if not 1 <= args.jobs <= 32:
         parser.error("--jobs must be between 1 and 32")
@@ -160,7 +237,7 @@ def main() -> int:
         parser.error("--qemu and --skip-qemu cannot be combined")
     # Allocate once, before a subprocess or extraction; a failed directory stays for inspection.
     output = args.output.absolute()
-    if output.is_symlink() or not output.parent.is_dir():
+    if any(p.is_symlink() for p in (output, *output.parents)) or not output.parent.is_dir():
         parser.error("output parent must exist, and output cannot be a symlink")
     try:
         output.mkdir(mode=0o700)
@@ -176,6 +253,25 @@ def main() -> int:
                 ("gcc", "ar", "ranlib", "strip", "readelf")}
         if any(not path.is_file() or not os.access(path, os.X_OK) for path in tool.values()):
             raise ValueError("complete executable ARM toolchain prefix required")
+        libc = None
+        if args.musl_build:
+            tool["gcc"], libc = validate_musl(args.musl_build.absolute())
+        ldflags = LDFLAGS + (" -static" if libc else "")
+        clock_compat = None
+        if libc:
+            companion = Path(__file__).with_name("yyos-clock-compat.c")
+            if companion.is_symlink() or digest(companion) != CLOCK_COMPAT_SHA256:
+                raise ValueError("YYOS legacy clock compatibility differs from audited source")
+            if not re.fullmatch(r"[A-Za-z0-9_./+-]+", str(output)):
+                raise ValueError("musl output path must not contain shell metacharacters or whitespace")
+            shutil.copyfile(companion, output / "yyos-clock-compat.c")
+            obj = output / "yyos-clock-compat.o"
+            run_logged([str(tool["gcc"]), *CFLAGS.split(), "-std=c11", "-c", str(companion), "-o", str(obj)],
+                       output, output / "clock-compat-build.log", 60)
+            ldflags += " " + str(obj)
+            clock_compat = {"source_sha256": CLOCK_COMPAT_SHA256, "object_sha256": digest(obj),
+                            "kernel_time_abi": "ARM EABI signed time32 converted to libc time64",
+                            "clock_source": "requested POSIX clock, including monotonic", "timeouts_disabled": False}
         qemu = args.qemu
         if not args.skip_qemu:
             qemu = qemu or Path(shutil.which("qemu-arm") or REPO / ".local/tools/root/usr/bin/qemu-arm")
@@ -193,17 +289,24 @@ def main() -> int:
             raise ValueError("copied source hash mismatch")
         stage = "extract"
         source = unpack_source(retained_archive, output)
+        clock_patch = patch_clock_fallback(source) if libc else None
         build = output / "build-arm"
         build.mkdir()
         shutil.copyfile(config, build / "localoptions.h")
         stage = "configure"
         run_logged([str(tool["gcc"]), "--version"], build, output / "compiler-version.log", 20)
-        command = [str(source / "configure"), *CONFIGURE_FLAGS,
+        configure_flags = CONFIGURE_FLAGS.copy()
+        if libc:
+            configure_flags[0] = "--host=arm-linux-musleabi"
+        cflags = CFLAGS + (" -DLSCAMOFLASH_YYOS_CLOCK_COMPAT=1" if libc else "")
+        command = [str(source / "configure"), *configure_flags,
                    f"CC={tool['gcc']}", f"AR={tool['ar']}", f"RANLIB={tool['ranlib']}",
-                   f"STRIP={tool['strip']}", f"CFLAGS={CFLAGS}", f"LDFLAGS={LDFLAGS}"]
+                   f"STRIP={tool['strip']}", f"CFLAGS={cflags}", f"LDFLAGS={ldflags}"]
         # Relative source layout also keeps __FILE__ strings consistent between builds.
         command[0] = f"../dropbear-{VERSION}/configure"
         run_logged(command, build, output / "configure.log", 180)
+        if libc and not re.search(r"^#define HAVE_OPENPTY\b", (build / "config.h").read_text(), re.MULTILINE):
+            raise ValueError("static musl configure did not detect required openpty support")
         stage = "make"
         run_logged(["make", f"-j{args.jobs}", "PROGRAMS=dropbear dropbearkey", "MULTI=1"],
                    build, output / "make.log", 600)
@@ -218,6 +321,11 @@ def main() -> int:
         run_logged([str(tool["readelf"]), "-h", "-A", "-l", str(binary)], build,
                    output / "elf-report.txt", 30)
         license_bundle(source, output / "DROPBEAR-LICENSES.txt")
+        if libc:
+            with (output / "DROPBEAR-LICENSES.txt").open("a") as notices:
+                for name in ("COPYING.musl", "GCC-COPYING3", "GCC-COPYING.RUNTIME"):
+                    notices.write(f"\n===== Static runtime {name} =====\n")
+                    notices.write((args.musl_build / name).read_text())
         stage = "qemu"
         emulation = {"performed": not args.skip_qemu, "cpu": "arm926", "passed": False}
         if not args.skip_qemu:
@@ -236,7 +344,7 @@ def main() -> int:
             "source_archive_sha256": SOURCE_SHA256, "binary_sha256": digest(binary),
             "build_script_sha256": digest(Path(__file__)),
             "binary_bytes": binary.stat().st_size, "elf": elf,
-            "configure_flags": CONFIGURE_FLAGS, "cflags": CFLAGS, "ldflags": LDFLAGS,
+            "configure_flags": configure_flags, "cflags": cflags, "ldflags": LDFLAGS + (" -static" if libc else ""),
             "make_args": ["PROGRAMS=dropbear dropbearkey", "MULTI=1"],
             "compiler_version": (output / "compiler-version.log").read_text().splitlines()[0],
             "localoptions_sha256": digest(config), "localoptions": config.read_text(),
@@ -247,6 +355,11 @@ def main() -> int:
             "syslog_cli_note": "Omit -E: stderr is already default with --disable-syslog; -s/-j/-k accepted as no-ops.",
             "static_libc_distribution_note": "Retain the source and relinkable build objects, and supply libc license/source obligations before redistribution.",
         }
+        if libc:
+            provenance.update({"libc": libc, "static_libc_version": "musl1.2.6",
+                               "yyos_clock_compat": clock_compat,
+                               "yyos_clock_patch": clock_patch,
+                               "static_libc_distribution_note": "Pinned musl MIT notices and GCC runtime exception included; retain the supplied source and build provenance."})
         write_json(output / "provenance.json", provenance)
         write_json(output / "result.json", {"ok": True, "stage": "complete",
                    "elapsed_seconds": round(time.monotonic() - started, 3),

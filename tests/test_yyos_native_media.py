@@ -507,6 +507,34 @@ class GuardedConfigurationTests(unittest.TestCase):
             self.assertFalse(any(call[0] == 'set' for call in fake.calls))
             self.assertNotIn(PASSWORD, str(caught.exception))
 
+    def test_actual_insecure_journal_permissions_refuse_before_secret_or_tuya_write(self):
+        real_stat = Path.stat
+        def insecure(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if path == self.operation:
+                values = list(info); values[0] = (info.st_mode & ~0o777) | 0o777
+                return os.stat_result(values)
+            return info
+        fake = FakeTransport([{'dps': {'237': False, '239': True}}])
+        with mock.patch.object(Path, 'stat', insecure), self.assertRaisesRegex(MEDIA.MediaError, 'unsafe_operation_permissions'):
+            self.flow(transport=fake)
+        self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+        self.assertEqual(list(self.operation.iterdir()), [])
+
+    def test_actual_insecure_new_journal_file_refuses_before_any_bytes(self):
+        real_fstat = os.fstat
+        def insecure(descriptor):
+            info = real_fstat(descriptor)
+            if stat.S_ISREG(info.st_mode):
+                values = list(info); values[0] = (info.st_mode & ~0o777) | 0o777
+                return os.stat_result(values)
+            return info
+        fake = FakeTransport([{'dps': {'237': False, '239': True}}])
+        with mock.patch.object(MEDIA.os, 'fstat', insecure), self.assertRaisesRegex(MEDIA.MediaError, 'unsafe_operation_permissions'):
+            self.flow(transport=fake)
+        self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+        self.assertTrue(all(path.stat().st_size == 0 for path in self.operation.iterdir()))
+
     def test_password_rejection_and_mismatched_readback_never_enable(self):
         fake = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2,
                              writes=[{'dps': {'238': '{"res":"failed","errcode":1}'}}])

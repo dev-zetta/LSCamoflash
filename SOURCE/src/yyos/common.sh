@@ -57,7 +57,7 @@ trusted_mount() {
     done < "$MOUNTS"
     [ "$matching" = 1 ] && [ "$writable" = 1 ]
 }
-PAYLOAD_FILES="start.sh stop.sh common.sh README.md bin/busybox www/index.html www/dashboard.js www/dashboard.css www/cgi-bin/status.cgi LICENSE.MIT COPYING.BusyBox manifest.json"
+PAYLOAD_FILES="start.sh stop.sh common.sh README.md bin/busybox bin/yyos-recordings www/index.html www/dashboard.js www/dashboard.css www/cgi-bin/status.cgi www/cgi-bin/recordings.cgi LICENSE.MIT COPYING.BusyBox manifest.json"
 verify_payload() {
     regular "$ROOT/SHA256SUMS" || return 1
     for relative in $PAYLOAD_FILES; do regular "$ROOT/$relative" || return 1; done

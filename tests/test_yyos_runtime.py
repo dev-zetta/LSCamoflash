@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'SOURCE/src/yyos'
 FILES = ('common.sh', 'start.sh', 'stop.sh', 'README.md', 'www/index.html',
          'www/dashboard.js', 'www/dashboard.css', 'www/cgi-bin/status.cgi',
-         'bin/busybox', 'LICENSE.MIT', 'COPYING.BusyBox', 'manifest.json')
+         'bin/busybox', 'bin/yyos-recordings', 'www/cgi-bin/recordings.cgi', 'LICENSE.MIT', 'COPYING.BusyBox', 'manifest.json')
 
 
 def start_time(pid):
@@ -36,6 +36,8 @@ class RuntimeTests(unittest.TestCase):
         (self.kit / 'bin').mkdir()
         shutil.copyfile(shutil.which('busybox'), self.kit / 'bin/busybox')
         (self.kit / 'bin/busybox').chmod(0o755)
+        # Unused runtime-inventory stand-in; the actual C helper has separate host/ARM fixtures.
+        shutil.copyfile(shutil.which('busybox'), self.kit / 'bin/yyos-recordings')
         self.bb = str(self.kit / 'bin/busybox')
         self.state = self.fixture / 'state'
         self.device = self.fixture / 'mmcblk0p1'
@@ -65,7 +67,7 @@ class RuntimeTests(unittest.TestCase):
             self.network_allowed = True
         except PermissionError:
             self.port = 49151; self.network_allowed = False
-        for path in (self.kit / 'start.sh', self.kit / 'stop.sh', self.kit / 'common.sh', self.kit / 'www/cgi-bin/status.cgi'):
+        for path in (self.kit / 'start.sh', self.kit / 'stop.sh', self.kit / 'common.sh', self.kit / 'www/cgi-bin/status.cgi', self.kit / 'www/cgi-bin/recordings.cgi'):
             text = path.read_text().replace('/mnt/sdcard', str(self.card))
             if path.name == 'common.sh':
                 changes = {
@@ -196,8 +198,9 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(data['streams']['verified']); self.assertFalse(data['onvif']['verified'])
         self.assertEqual(data['streams']['main_candidate'], 'rtsp://192.0.2.44:8554/stream0')
         self.assertEqual(data['onvif']['candidate_url'], 'http://192.0.2.44:5000/onvif/device_service')
-        for flag in ('stock_app_managed', 'settings_write', 'network_write', 'recordings', 'ptz', 'reboot', 'firmware_update'):
+        for flag in ('stock_app_managed', 'settings_write', 'network_write', 'ptz', 'reboot', 'firmware_update'):
             self.assertFalse(data[flag])
+        self.assertEqual(data['recordings'], {'read_only': True, 'format': 'yyos-v5-media', 'playback': False})
         for private in ('PRIVATE', 'DO-NOT-LEAK', 'DO-NOT-EXECUTE', 'fixture-password'):
             self.assertNotIn(private, response.stdout)
 

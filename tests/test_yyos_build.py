@@ -84,7 +84,9 @@ class YYOSBuildTests(unittest.TestCase):
         for directory in (self.output, card, runtime):
             self.check_sums(directory)
         names = {str(p.relative_to(card)) for p in card.rglob('*')}
-        self.assertFalse(any('onvif_srvd' in p or 'recordings.cgi' in p or 'hostapd' in p for p in names))
+        self.assertFalse(any('onvif_srvd' in p or 'hostapd' in p for p in names))
+        self.assertIn('LSCamoflash-yyos/www/cgi-bin/recordings.cgi', names)
+        self.assertIn('LSCamoflash-yyos/bin/yyos-recordings', names)
         for name in ('_ht_ap_mode.conf', '_ht_get_log.conf', 'yy_debug.ini', 'hack.sh'):
             self.assertNotIn(name, names)
 
@@ -128,7 +130,7 @@ class YYOSBuildTests(unittest.TestCase):
     def test_concurrent_addition_preserved(self):
         def command(argv, **kwargs):
             result = self.command(argv, **kwargs)
-            self.output.mkdir()
+            self.output.mkdir(exist_ok=True)
             (self.output / 'keep').write_bytes(b'CONCURRENT')
             return result
         with self.assertRaisesRegex(ValueError, 'empty'):

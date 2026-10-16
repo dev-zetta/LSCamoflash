@@ -1,0 +1,11 @@
+# VLC playback checks for YYOS recordings
+
+The LSC 3225722 / SZ F26312 native H.264 and PCMU streams and downloaded recordings have passed software decoding checks. This does not establish playback in every VLC build; visual and audible playback in the owner's player remains a separate acceptance check.
+
+For VLC 4, the active software-decoding option is `--no-hw-dec`. It appears in the installed Snap revision 4527's help and disables decoder-device allocation in the [matching VideoLAN decoder source](https://github.com/videolan/vlc/blob/ce4af2f7ef/src/input/decoder.c#L947-L954). The older `--avcodec-hw=none` setting is [obsolete in VLC 4](https://github.com/videolan/vlc/blob/ce4af2f7ef/modules/codec/avcodec/avcodec.c#L127). Treat software decoding as a diagnostic comparison, not a verified fix for the current VLC failure.
+
+The tested VLC Snap is the development build `4.0.0-dev-39395-gce4af2f7ef`, revision 4527. Isolated local transcoding controls aborted with both the native recording and the compatible H.264/AAC MP4, with different errors: heap corruption and a PCR synchronization assertion. These failures occurred without camera access and do not identify the cause of the owner's GUI or live RTSP crash. Earlier revision 4525 VAAPI assertions are historical evidence, not a current-revision diagnosis.
+
+The Snap wrapper forces X11 and supplies its persistent configuration path. A fresh configuration must also isolate `HOME`, the XDG directories and the Snap user directories before invoking that wrapper; adding a config filename alone does not isolate its AACS link or caches. The completed audit used a Snap debug shell, private directories, an explicit trailing `--config`, `--ignore-config`, `--no-one-instance`, `--no-media-library` and a dummy interface. No persistent VLC preferences were changed. A GUI launch recipe is deliberately pending an interactive check; headless transcoding results are not a playback guarantee.
+
+Start an interactive comparison with the locally converted compatible MP4, then test the native recording and finally a separately coordinated authenticated RTSP connection. Keep native credentials out of command lines and logs. Raw `.media` segments need the [host converter](../tools/yyos/convert-recording.py); they are not MP4 files, and encrypted or unrecognized recording formats are refused.

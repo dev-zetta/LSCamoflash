@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Add an explicit SSH-guarded native setup path with fresh exact-profile checks, independent RTSP/ONVIF flags and listeners, durable private preservation, acknowledgement/readback gates and one-attempt journals. Legacy unguarded configuration remains blocked. Fifty-five offline tests and live refusal on an enabled camera passed; the new guarded write sequence still needs physical acceptance.
+- Add read-only YYOS recording browsing and authenticated raw/metadata downloads, preserving the stock recording tree. Twelve live HTTP checks passed after a guarded remote update, with unchanged stock PID and 648 KiB HTTP RSS. Add a host converter for observed unencrypted v5 H.264/PCMU recordings; independent comparison retained every packet payload and timestamp, and software decoding passed. Browser playback, encrypted formats and recording deletion remain unavailable.
+- Add a pinned static musl SSH build with component notices and an exact-profile legacy-clock adapter for this camera's success-without-output time64 kernel stub. Camera clock/file/fork/wait probes and temporary-server authentication/PTY controls passed; the existing SSH service was preserved.
+
+- Add an explicit SSH-guarded native setup path with fresh exact-profile checks, independent RTSP/ONVIF flags and listeners, durable private preservation, acknowledgement/readback gates and one-attempt journals. Legacy unguarded configuration remains blocked. Fifty-seven offline tests and live refusal on an enabled camera passed; the new guarded write sequence still needs physical acceptance.
 
 - Add an isolated, explicitly enabled key-only SSH runtime for the exact 3225722 / SZ F26312 / V14.1.5 profile, with ARM926 Dropbear build provenance, protected RAM keys and guarded LAN startup. Short physical normal-boot checks on 2026-10-16 accepted pinned-host/owner-key root access, rejected wrong-key/password methods, accepted PTY access with stdin held open and verified a 32 KiB SD upload/atomic-rename/download/cleanup round trip. An initial EOF-sensitive PTY fixture failure was preserved/reproduced under QEMU, with no firmware fix claimed. SSH master RSS was 292 KiB / one thread.
 

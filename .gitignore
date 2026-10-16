@@ -79,3 +79,11 @@ SOURCE/src/contrib/rtsp-callback/libcamoflash_rtsp.so
 SOURCE/fullhan-kit/
 SOURCE/fullhan-onvif/
 SOURCE/fullhan-busybox/
+
+# Generated YYOS runtime and reproducible dependency builds
+SOURCE/yyos-inputs/
+SOURCE/yyos-musl/
+SOURCE/yyos-dropbear/
+SOURCE/yyos-ssh-kit/
+SOURCE/yyos-management-kit/
+SOURCE/yyos-release-kit/

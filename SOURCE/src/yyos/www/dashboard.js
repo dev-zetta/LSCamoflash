@@ -1,6 +1,6 @@
 'use strict';
 (function (root) {
-  const TABS = ['dashboard', 'streams', 'diagnostics'];
+  const TABS = ['dashboard', 'streams', 'recordings', 'diagnostics'];
   function number(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER ? value : null; }
   function mib(value) { return number(value) === null ? 'Not reported' : (value / 1024).toFixed(1) + ' MiB'; }
   function duration(value) {
@@ -33,10 +33,27 @@
       return url.protocol === 'http:' && url.hostname === ip && url.port === '5000' && url.pathname === '/onvif/device_service' && !url.username && !url.password && !url.search && !url.hash ? url.href : null;
     } catch (_) { return null; }
   }
+  function recordingURL(value, day, session, file) {
+    if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || typeof session !== 'string' || !/^\d{10}_\d{4}$/.test(session) || typeof file !== 'string' || !/^(?:\d{4}\.media|\.info)$/.test(file)) return null;
+    const expected = 'recordings.cgi?action=download&day=' + day + '&session=' + session + '&file=' + file;
+    return value === expected ? 'cgi-bin/' + expected : null;
+  }
+  function recordingPage(data, day, session, offset) {
+    const kind = session ? 'segments' : day ? 'sessions' : 'days', key = session ? 'files' : day ? 'sessions' : 'days';
+    if (!data || data.kind !== kind || !Array.isArray(data[key]) || data[key].length > 100 || data.offset !== offset || data.limit !== 100 || typeof data.scan_truncated !== 'boolean' || data.ranges_supported !== false || (data.next_offset !== null && data.next_offset !== offset + 100) || (day && data.day !== day) || (session && data.session !== session)) throw new Error('Invalid recording index.');
+    data[key].forEach(entry => {
+      if (kind === 'days') { if (typeof entry !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(entry)) throw new Error('Invalid recording day.'); }
+      else if (kind === 'sessions') {
+        if (!entry || typeof entry.session !== 'string' || !/^\d{10}_\d{4}$/.test(entry.session) || number(entry.start_epoch) === null || number(entry.duration_seconds) === null || entry.start_epoch !== Number(entry.session.slice(0, 10)) || entry.duration_seconds !== Number(entry.session.slice(11)) || (entry.info_download !== null && !recordingURL(entry.info_download, day, entry.session, '.info'))) throw new Error('Invalid recording session.');
+      } else if (!entry || !/^\d{4}\.media$/.test(entry.name) || number(entry.bytes) === null || entry.bytes === 0 || !recordingURL(entry.download, day, session, entry.name)) throw new Error('Invalid recording segment.');
+    });
+    return {kind: kind, entries: data[key], next: data.next_offset, truncated: data.scan_truncated};
+  }
   function createApp(doc, fetcher, timers) {
     timers = timers || root;
     const el = id => doc.getElementById(id), text = (id, value) => { el(id).textContent = value; };
     let busy = false, interval = null;
+    let recordingsBusy = false, recordingsLoaded = false, recordingDay = '', recordingSession = '', recordingOffset = 0, recordingNext = null;
     function link(id, value) { text(id, value || 'Candidate address unavailable'); if (value) el(id).setAttribute('href', value); else el(id).removeAttribute('href'); }
     function meter(id, value) { el(id).hidden = value === null; el(id).value = value === null ? 0 : value; }
     function renderStatus(status) {
@@ -76,8 +93,52 @@
         text('error', error.name === 'AbortError' ? 'The status request timed out.' : error.message); el('error').hidden = false; text('connection', 'Status unavailable'); el('connection').className = 'status-badge offline'; text('last-updated', 'Status may be out of date');
       } finally { if (deadline !== null) timers.clearTimeout(deadline); busy = false; el('refresh-status').disabled = false; }
     }
+    function recordingLink(label, url) {
+      const anchor = doc.createElement('a'); anchor.textContent = label; anchor.className = 'button button-secondary'; anchor.setAttribute('href', url); anchor.setAttribute('download', ''); return anchor;
+    }
+    async function loadRecordings(day, session, offset) {
+      if (recordingsBusy) return;
+      recordingsBusy = true;
+      ['refresh-recordings', 'recordings-up', 'recordings-root', 'recordings-previous', 'recordings-next'].forEach(id => { el(id).disabled = true; });
+      text('recordings-state', 'Loading recordings…'); el('recordings-error').hidden = true;
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const deadline = controller ? timers.setTimeout(() => controller.abort(), 15000) : null;
+      try {
+        const query = new URLSearchParams({action: 'list', limit: '100', offset: String(offset)});
+        if (day) query.set('day', day); if (session) query.set('session', session);
+        const response = await fetcher('cgi-bin/recordings.cgi?' + query, {cache: 'no-store', credentials: 'same-origin', signal: controller ? controller.signal : undefined});
+        if (!response.ok) throw new Error(response.status === 401 ? 'Authentication required. Reload to sign in.' : 'Recording request failed (' + response.status + ').');
+        const page = recordingPage(await response.json(), day, session, offset);
+        recordingDay = day; recordingSession = session; recordingOffset = offset; recordingNext = page.next; recordingsLoaded = true;
+        const list = el('recordings-list'); list.replaceChildren();
+        page.entries.forEach(entry => {
+          const row = doc.createElement('li'), label = doc.createElement('div'), actions = doc.createElement('div'); label.className = 'recording-label'; actions.className = 'row-actions';
+          if (page.kind === 'days') {
+            label.textContent = entry;
+            const button = doc.createElement('button'); button.type = 'button'; button.className = 'button button-secondary'; button.textContent = 'Open day'; button.addEventListener('click', () => loadRecordings(entry, '', 0)); actions.appendChild(button);
+          } else if (page.kind === 'sessions') {
+            label.textContent = entry.session;
+            const detail = doc.createElement('small'); detail.textContent = new Date(entry.start_epoch * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC') + ' · ' + entry.duration_seconds + ' seconds'; label.appendChild(detail);
+            const button = doc.createElement('button'); button.type = 'button'; button.className = 'button button-secondary'; button.textContent = 'Open session'; button.addEventListener('click', () => loadRecordings(day, entry.session, 0)); actions.appendChild(button);
+            if (entry.info_download) actions.appendChild(recordingLink('Download private .info', recordingURL(entry.info_download, day, entry.session, '.info')));
+          } else { label.textContent = entry.name + ' · ' + mib(entry.bytes / 1024); actions.appendChild(recordingLink('Download raw segment', recordingURL(entry.download, day, session, entry.name))); }
+          row.appendChild(label); row.appendChild(actions); list.appendChild(row);
+        });
+        text('recordings-heading', session ? 'Raw recording segments' : day ? 'Recording sessions' : 'Recording days');
+        text('recordings-context', session ? day + ' / ' + session : day || 'Open a day, then a session.');
+        text('recordings-state', (page.entries.length ? '' : 'No entries on this page. ') + (page.truncated ? 'The scan limit was reached; this index is incomplete.' : 'Read-only index.'));
+        text('recordings-page', page.entries.length ? 'Entries ' + (offset + 1) + '–' + (offset + page.entries.length) : 'No entries');
+      } catch (error) { text('recordings-error', error.name === 'AbortError' ? 'The recording request timed out.' : error.message); el('recordings-error').hidden = false; text('recordings-state', 'Recording index unavailable.'); }
+      finally {
+        if (deadline !== null) timers.clearTimeout(deadline); recordingsBusy = false; el('refresh-recordings').disabled = false;
+        el('recordings-up').hidden = !recordingDay; el('recordings-root').hidden = !recordingSession; text('recordings-up', recordingSession ? 'Back to sessions' : 'Back to days');
+        el('recordings-up').disabled = false; el('recordings-root').disabled = false;
+        el('recordings-previous').disabled = recordingOffset === 0; el('recordings-next').disabled = recordingNext === null;
+      }
+    }
     function showTab(name) {
       if (!TABS.includes(name)) return;
+      if (name === 'recordings' && !recordingsLoaded) loadRecordings('', '', 0);
       TABS.forEach(tab => { const selected = tab === name; el('panel-' + tab).hidden = !selected; el('tab-' + tab).className = selected ? 'tab active' : 'tab'; el('tab-' + tab).setAttribute('aria-selected', String(selected)); el('tab-' + tab).tabIndex = selected ? 0 : -1; });
     }
     function initialize() {
@@ -89,12 +150,17 @@
         });
       });
       el('refresh-status').addEventListener('click', refreshStatus);
+      el('refresh-recordings').addEventListener('click', () => loadRecordings(recordingDay, recordingSession, recordingOffset));
+      el('recordings-root').addEventListener('click', () => loadRecordings('', '', 0));
+      el('recordings-up').addEventListener('click', () => loadRecordings(recordingSession ? recordingDay : '', '', 0));
+      el('recordings-previous').addEventListener('click', () => loadRecordings(recordingDay, recordingSession, Math.max(0, recordingOffset - 100)));
+      el('recordings-next').addEventListener('click', () => { if (recordingNext !== null) loadRecordings(recordingDay, recordingSession, recordingNext); });
       interval = timers.setInterval(() => { if (!doc.hidden) refreshStatus(); }, 15000);
       return refreshStatus();
     }
-    return {initialize: initialize, refreshStatus: refreshStatus, renderStatus: renderStatus, showTab: showTab, destroy: () => { if (interval !== null) timers.clearInterval(interval); }};
+    return {initialize: initialize, refreshStatus: refreshStatus, renderStatus: renderStatus, showTab: showTab, loadRecordings: loadRecordings, destroy: () => { if (interval !== null) timers.clearInterval(interval); }};
   }
-  const api = {mib: mib, memoryValues: memoryValues, streamURL: streamURL, serviceURL: serviceURL, createApp: createApp};
+  const api = {mib: mib, memoryValues: memoryValues, streamURL: streamURL, serviceURL: serviceURL, recordingURL: recordingURL, recordingPage: recordingPage, createApp: createApp};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document !== 'undefined' && typeof root.fetch === 'function') createApp(document, root.fetch.bind(root), root).initialize();
 })(typeof globalThis !== 'undefined' ? globalThis : window);

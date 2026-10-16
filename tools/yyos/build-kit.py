@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 SOURCE = REPO / 'SOURCE/src/yyos'
 FILES = ('common.sh', 'start.sh', 'stop.sh', 'README.md', 'www/index.html',
-         'www/dashboard.js', 'www/dashboard.css', 'www/cgi-bin/status.cgi')
+         'www/dashboard.js', 'www/dashboard.css', 'www/cgi-bin/status.cgi', 'www/cgi-bin/recordings.cgi')
 ROOT_FILES = {'telnetd', 'busybox', 'dump.sh', 'yy_telnet_start', 'SHA256SUMS'}
 FORMAT = 'lscamoflash-yyos-management-v1'
 STOCK_SHA = 'd76d632f41453f53d9d117582fc47073934f5e6ec9a9b7a0ebb1dd3824f6cba7'
@@ -85,9 +85,15 @@ def build(args):
         subprocess.run([str(cc), *BACKUP.FLAGS, str(REPO / 'tools/firmware-backup/hostapd.c'),
                         '-o', str(card / 'telnetd')], check=True, capture_output=True, timeout=120)
         launcher = NOR.validate_arm_elf(card / 'telnetd', readelf)
+        recordings_source = REPO / 'SOURCE/src/contrib/yyos-recordings/yyos_recordings.c'
+        AUTH.regular(recordings_source)
+        subprocess.run([str(cc), *BACKUP.FLAGS, '-std=c99', '-Wall', '-Wextra', '-Werror',
+                        str(recordings_source), '-o', str(runtime / 'bin/yyos-recordings')],
+                       check=True, capture_output=True, timeout=120)
+        recordings = NOR.validate_arm_elf(runtime / 'bin/yyos-recordings', readelf)
         for name in ('telnetd', 'dump.sh'):
             (card / name).chmod(0o755)
-        for name in ('start.sh', 'stop.sh', 'www/cgi-bin/status.cgi'):
+        for name in ('start.sh', 'stop.sh', 'www/cgi-bin/status.cgi', 'www/cgi-bin/recordings.cgi', 'bin/yyos-recordings'):
             (runtime / name).chmod(0o755)
         (card / 'yy_telnet_start').touch(mode=0o600)
         shutil.copyfile(AUTH.regular(REPO / 'LICENSE'), runtime / 'LICENSE.MIT')
@@ -95,11 +101,13 @@ def build(args):
         if credentials:
             (runtime / 'httpd.conf').write_bytes(credentials)
             (runtime / 'httpd.conf').chmod(0o600)
-        names = (*FILES, 'bin/busybox', 'LICENSE.MIT', 'COPYING.BusyBox')
+        names = (*FILES, 'bin/busybox', 'bin/yyos-recordings', 'LICENSE.MIT', 'COPYING.BusyBox')
         manifest = {'format': FORMAT, 'target': '3225722 / SZ F26312 / V14.1.5 / AK3918AV130',
                     'stock_sha256': STOCK_SHA, 'busybox': elf, 'busybox_repository_sources': source_inputs,
                     'arm926_smoke': bool(qemu), 'credentials_provisioned': credentials is not None,
                     'native_media_verified': False, 'settings_write': False, 'stock_app_managed': False,
+                    'recordings': {'elf': recordings, 'source_sha256': NOR.digest(recordings_source),
+                                   'read_only': True, 'format': 'yyos-v5-media', 'browser_playback': False},
                     'files': {name: NOR.digest(runtime / name) for name in sorted(names)}}
         (runtime / 'manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
         NOR.write_sums(runtime, (*names, 'manifest.json'))

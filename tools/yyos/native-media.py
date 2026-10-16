@@ -784,12 +784,31 @@ def sync_directory(path):
 
 
 def private_new(path, data):
+    private_directory(path.parent)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+                and stat.S_IMODE(info.st_mode) == 0o600, 'unsafe_operation_permissions')
+        private_directory(path.parent)
+    except BaseException:
+        os.close(descriptor)
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
     with os.fdopen(descriptor, 'wb') as stream:
         stream.write(data)
         stream.flush()
         os.fsync(stream.fileno())
     sync_directory(path.parent)
+
+
+def private_directory(path):
+    info = path.stat(follow_symlinks=False)
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+            and stat.S_IMODE(info.st_mode) == 0o700, 'unsafe_operation_permissions')
 
 
 def private_json(path, value):
@@ -827,6 +846,7 @@ def configure_guarded(credentials, host, password, client_key, known_hosts, oper
         wire_old = guarded_old_password(snapshot, initial_status, old_password)
         phase = 'preservation'
         directory.mkdir(mode=0o700)
+        private_directory(directory)
         created = True
         sync_directory(directory.parent)
         private_new(directory / 'param-before.conf', snapshot.param)

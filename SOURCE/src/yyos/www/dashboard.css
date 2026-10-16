@@ -524,3 +524,10 @@ footer {
     margin-top: 5px;
   }
 }
+
+.recordings-list { list-style: none; padding: 0; margin: 12px 0; }
+.recordings-list li { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.recording-label { overflow-wrap: anywhere; }
+.recording-label small { display: block; color: var(--muted); }
+.recordings-list .row-actions { flex-wrap: wrap; }
+@media(max-width:600px) { .recordings-list li { align-items: flex-start; flex-direction: column; } }

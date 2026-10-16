@@ -107,6 +107,8 @@ jobs:
         mkdir -p "$RUNNER_TEMP/fullhan-codeql"
         cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/fullhan-recordings/fullhan_recordings.c -o "$RUNNER_TEMP/fullhan-codeql/recordings.o"
         cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/fullhan-discovery/discovery.c -o "$RUNNER_TEMP/fullhan-codeql/discovery.o"
+        mkdir -p "$RUNNER_TEMP/yyos-codeql"
+        cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/yyos-recordings/yyos_recordings.c -o "$RUNNER_TEMP/yyos-codeql/recordings.o"
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3; Node 24
