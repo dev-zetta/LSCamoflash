@@ -1,6 +1,6 @@
 # Install LSCamoflash
 
-This guide covers the **Anyka runtime**. Fullhan SZ B22705 / 7.6.23 uses the separate [Fullhan download and setup](camera-sz-b22705.md#prepare-the-private-payload), without these installers or card layouts. Use a published platform-specific package for installation. Building from source is optional and covered in [Building and testing](building.md). Check the [compatibility notes](integration.md) and the guide for your exact camera first; the verified [3007325.5 / SI L25502 profile](camera-3007325.5.md) has different streaming and Wi-Fi requirements from older cameras.
+This guide covers the **Anyka runtime**. Fullhan SZ B22705 / 7.6.23 uses the separate [Fullhan download and setup](camera-sz-b22705.md#prepare-the-private-payload), without these installers or card layouts. YYOS LSC 3225722 / SZ F26312 / V14.1.5 uses its own [YYOS setup](yyos-setup.md) and private installer. Use a published platform-specific package for installation. Building from source is optional and covered in [Building and testing](building.md). Check the [compatibility notes](integration.md) and the guide for your exact camera first; the verified [3007325.5 / SI L25502 profile](camera-3007325.5.md) has different streaming and Wi-Fi requirements from older cameras.
 
 ## Before you start
 
@@ -10,13 +10,14 @@ The partitioning scripts erase the entire selected disk. Removing the SD card st
 
 ## Choose a download
 
-Open [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) in this fork and expand **Assets**.
+Open [v2.01.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.01.0000) in this fork and expand **Assets**.
 
 | File | When to use it |
 | --- | --- |
-| `LSCamoflash-2.00.0000-uclibc.tar.gz` | A new **Anyka** runtime installation. Contains generated card files and installers. |
-| `LSCamoflash-2.00.0000-fullhan.tar.gz` | Separate **Fullhan** management folder, private credentials and manual startup. Follow its [camera guide](camera-sz-b22705.md#prepare-the-private-payload). |
-| `update-2.00.0000-uclibc.tgz` | Updating an existing **Anyka** runtime while retaining its configuration. See [updates](configuration.md#updates). |
+| `LSCamoflash-2.01.0000-uclibc.tar.gz` | A new **Anyka** runtime installation. Contains generated card files and installers. |
+| `LSCamoflash-2.01.0000-fullhan.tar.gz` | Separate **Fullhan** management folder, private credentials and manual startup. Follow its [camera guide](camera-sz-b22705.md#prepare-the-private-payload). |
+| `LSCamoflash-2.01.0000-yyos.tar.gz` | Separate experimental **YYOS** management, optional controls/SSH and host recording tools. Follow its [private setup](yyos-setup.md); these Anyka installers do not apply. |
+| `update-2.01.0000-uclibc.tgz` | Updating an existing **Anyka** runtime while retaining its configuration. See [updates](configuration.md#updates). |
 | `LSCamoflash-<version>-backup-kit.tar.gz` | Backing up stock firmware without installing the runtime. See the [backup guide](firmware-backup.md). |
 | `SHA256SUMS` | Verifying downloaded files. |
 | `LSCamoflash-<version>-source.tar.gz` | Developer source and declared build inputs; not a camera installation. |

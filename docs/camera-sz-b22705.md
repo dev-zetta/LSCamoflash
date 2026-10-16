@@ -119,7 +119,7 @@ The expanded interface, recording endpoints and direct ONVIF service passed the 
 
 ### Prepare the private payload
 
-Complete and verify an independent firmware backup first. Download **`LSCamoflash-2.00.0000-fullhan.tar.gz`** and `SHA256SUMS` from [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000), verify the archive, and extract it into private host storage. It contains the required top-level **`LSCamoflash-fullhan/`** folder, static ONVIF, helpers, notices and payload checksums. Check the extracted public files with `sha256sum -c SHA256SUMS` from inside that folder.
+Complete and verify an independent firmware backup first. Download **`LSCamoflash-2.01.0000-fullhan.tar.gz`** and `SHA256SUMS` from [v2.01.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.01.0000), verify the archive, and extract it into private host storage. It contains the required top-level **`LSCamoflash-fullhan/`** folder, static ONVIF, helpers, notices and payload checksums. Check the extracted public files with `sha256sum -c SHA256SUMS` from inside that folder.
 
 The public archive contains no `httpd.conf`, `onvif.auth` or `onvif.uuid`. **Authentication is mandatory, and there is no default dashboard password.** Provision private credentials on the host before copying the folder to the camera. Published binaries require no compilation; a source build remains available through [Building and testing](building.md#build-the-separate-fullhan-pilot).
 

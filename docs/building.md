@@ -90,9 +90,13 @@ Independent ONVIF credentials remain mandatory for service startup. The only ano
 
 `httpd.conf`, `onvif.auth` and `onvif.uuid` stay outside the served `www/` directory and are excluded from the public payload checksum list. Keep these site-owned files and all private output copies out of the repository and published artifacts. Preserve the existing ONVIF credentials and UUID when replacing a stopped installation so clients retain the same endpoint identity; the builder generates a fresh UUID for a newly provisioned copy.
 
-The builder checks static ARM ELF attributes, includes license notices and records public payload checksums. `--qemu` also verifies BusyBox applets, HTTP authentication support and helper invalid-input behavior under ARM1176. The optional ONVIF build records its source inputs and patch provenance. Neither builder installs files on a camera. CI produces the credential-free Fullhan payload independently and release preparation packages it as `LSCamoflash-<version>-fullhan.tar.gz`. It is a separate experimental platform asset among the nine v2 release files; private authentication and UUID files must never be included.
+The builder checks static ARM ELF attributes, includes license notices and records public payload checksums. `--qemu` also verifies BusyBox applets, HTTP authentication support and helper invalid-input behavior under ARM1176. The optional ONVIF build records its source inputs and patch provenance. Neither builder installs files on a camera. CI produces the credential-free Fullhan payload independently and release preparation packages it as `LSCamoflash-<version>-fullhan.tar.gz`. It is a separate experimental platform asset among the ten release files; private authentication and UUID files must never be included.
 
 Follow the [camera guide](camera-sz-b22705.md#experimental-fullhan-management-interface) for placement, mandatory authentication, separate manual HTTP/ONVIF start and stop commands, and acceptance limits. Each camera reboot still requires `start.sh` and, if ONVIF is used, `onvif-start.sh --no-discovery` to be started manually. This unit’s stock application owns UDP 3702; the new authenticated service uses manual client setup at port 5000 and leaves stock discovery untouched.
+
+## Build the separate YYOS package
+
+Follow [YYOS setup → Build from current source](yyos-setup.md#build-from-current-source) for the pinned musl, Dropbear, native controls, management and combined-package commands. The [Build-Test workflow](../.github/workflows/makefile.yml) uses the exact release staging paths; its final package must be `SOURCE/yyos-release-kit/` before release preparation. That credential-free tree includes disabled optional SSH, native controls without a local key, recording tools and matching source/object/license provenance. ARM926 smoke checks are required. Neither building nor packaging contacts the camera or installs files on a card.
 
 ## Verify the generated runtime
 
@@ -131,6 +135,8 @@ If `qemu-arm` is installed elsewhere, replace both `/usr/bin/qemu-arm` paths wit
 
 After also building the Fullhan ONVIF candidate, supply `FULLHAN_ONVIF_BIN="$PWD/SOURCE/fullhan-onvif/bin/onvif_srvd"` and `FULLHAN_ONVIF_QEMU=/usr/bin/qemu-arm` alongside the environment variables above to enable the real authenticated SOAP fixtures under ARM1176. The HTTP Range fixtures automatically use `SOURCE/fullhan-busybox/bin/busybox`. Both HTTP and SOAP fixtures need permission to bind loopback sockets; inspect the final test summary for skipped checks. CI supplies these variables and runs the complete suite with the separately built Fullhan outputs.
 
+YYOS protocol fixtures also need the pinned TinyTuya dependency from `tools/yyos/requirements.txt`. Use a private virtual environment and set `YYOS_CONTROLS_BUILD` to the controls builder output, `YYOS_CONTROLS_KIT` to its management kit, `YYOS_MUSL_BUILD` to the musl output, `ARM_CC` to the ARM compiler and `QEMU_ARM` to QEMU. The workflow installs these dependencies and supplies all five variables. Run the suite with that environment's Python, and check that the controls and optional SOAP cases actually ran.
+
 To run a focused subset, select its test file. For example, the standalone backup tests can be run with:
 
 ```sh
@@ -160,7 +166,7 @@ cd release
 sha256sum --strict --check SHA256SUMS
 ```
 
-After the separate Fullhan build above, this produces the Anyka full/update archives, credential-free Fullhan archive, packaged backup kit, public source bundle, license notices and `SHA256SUMS` (nine release assets). The source bundle includes tracked public files and hydrated declared build inputs; it excludes private `.local/` data and untracked files. The helper checks archive consistency and source input hashes, but does not run the build or its runtime verifier for you. It refuses to replace a nonempty output directory.
+After the separate Fullhan and YYOS builds above, this produces the Anyka full/update archives, credential-free Fullhan and YYOS archives, packaged backup kit, public source bundle, license notices and `SHA256SUMS` (ten release assets). The source bundle includes tracked public files and hydrated declared build inputs; it excludes private `.local/` data and untracked files. The helper checks archive consistency and source input hashes, but does not run the build or its runtime verifier for you. It refuses to replace a nonempty output directory.
 
 See the [release guide](release.md) for published packages and release information, the [changelog](../CHANGELOG.md) for changes, and the [third-party notices](../SOURCE/3RD_PARTY_LICENSES.md) for bundled components and their source/license requirements.
 
@@ -180,6 +186,6 @@ Publishing is a separate maintainer step with repository write access. The [Publ
      -f build_run_id="$BUILD_RUN_ID"
    ```
 
-5. Wait for the publishing run to finish successfully. Confirm that the new `v<version>` tag points to the validated commit, the release contains all nine expected assets, and the downloaded assets pass `sha256sum --strict --check SHA256SUMS` when collected together. The eight checksummed files are the Anyka full runtime, Anyka update, Fullhan management, backup kit, source bundle, `LICENSE.MIT`, `COPYING.BusyBox` and `THIRD_PARTY_NOTICES.md`; `SHA256SUMS` is the ninth asset. Confirm that the Fullhan archive contains the exact named folder and no site credentials, UUID, logs or state.
+5. Wait for the publishing run to finish successfully. Confirm that the new `v<version>` tag points to the validated commit, the release contains all ten expected assets, and the downloaded assets pass `sha256sum --strict --check SHA256SUMS` when collected together. The nine checksummed files are the Anyka full runtime, Anyka update, Fullhan management, YYOS kit, backup kit, source bundle, `LICENSE.MIT`, `COPYING.BusyBox` and `THIRD_PARTY_NOTICES.md`; `SHA256SUMS` is the tenth asset. Confirm that the Fullhan and YYOS archives contain their exact named folders and no site credentials, local keys, SSH keys/enable markers, UUID, logs or state.
 
 The workflow checks the CI artifact's SHA-256 manifest, refuses an existing version tag, and creates the release at the validated commit using `CHANGELOG.md` as its notes. The Build-Test match is enforced by the workflow; waiting for the other checks remains part of the maintainer procedure. Fix a failed run before treating the release as published, and use a new version for a later release rather than replacing an existing tag.

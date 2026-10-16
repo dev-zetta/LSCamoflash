@@ -4,13 +4,13 @@ This fork starts at upstream commit `40bf27bcd782139e05b7067761cad337cf52d1fd`. 
 
 ## Current release and setup
 
-Use [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) and its [release notes](release.md) for the current package split: Anyka runtime, separate experimental Fullhan management, and independent backup tools. The [installation guide](installation.md) covers Anyka; the [Fullhan guide](camera-sz-b22705.md) covers its private credentials and manual startup.
+Use [v2.01.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.01.0000) and its [release notes](release.md) for the current package split: Anyka runtime, separate experimental Fullhan and YYOS management, and independent backup tools. The [installation guide](installation.md) covers Anyka; the [Fullhan guide](camera-sz-b22705.md) covers its private credentials and manual startup; the [YYOS setup guide](yyos-setup.md) covers the exact LSC 3225722 / SZ F26312 / V14.1.5 package and private provisioning.
 
 The earlier release v1.03.2413 passed hosted [Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/runs/38447987161) with all 334 ARM tests, [Shell regressions](https://github.com/dev-zetta/LSCamoflash/actions/runs/38447987054), [CodeQL](https://github.com/dev-zetta/LSCamoflash/actions/runs/38447987529) and [publication](https://github.com/dev-zetta/LSCamoflash/actions/runs/38455561395). All eight published assets were checked against their SHA-256 digests.
 
-The detailed validation sections below retain the development history. Older archive hashes, failed camera attempts and statements that no release had been published describe their individual checkpoints, not the current release. Current device setup and acceptance limits are in the [3007325.5 guide](camera-3007325.5.md).
+The detailed validation sections below retain the development history. Older archive hashes, failed camera attempts and statements that no release had been published describe their individual checkpoints, not the current release. Current device setup and acceptance limits are in the [3007325.5 guide](camera-3007325.5.md), [Fullhan guide](camera-sz-b22705.md) and [YYOS guide](camera-3225722.md).
 
-The [Fullhan SZ B22705 / firmware 7.6.23 guide](camera-sz-b22705.md) records a separate platform investigation, its stock RTSP endpoints and host-verified manual firmware backup. Its isolated management package is included separately in v2.00.0000; it is not an Anyka runtime or an update to the older v1.03.2413 assets.
+The [Fullhan SZ B22705 / firmware 7.6.23 guide](camera-sz-b22705.md) records a separate platform investigation, its stock RTSP endpoints and host-verified manual firmware backup. Its isolated management package was first released separately in v2.00.0000 and is retained in v2.01.0000; it is not an Anyka runtime or an update to the older v1.03.2413 assets.
 
 ## Integrated pull requests
 

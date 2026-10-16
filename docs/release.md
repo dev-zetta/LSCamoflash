@@ -1,5 +1,38 @@
 # LSCamoflash releases
 
+## Version 2.01.0000 - 2026-10-16
+
+This minor release adds a separate experimental **YYOS LSC 3225722 / SZ F26312 / V14.1.5** package while retaining the Anyka and Fullhan packages. Download the archive for your platform, `SHA256SUMS` and notices from [v2.01.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.01.0000). See the [2.01.0000 changelog](https://github.com/dev-zetta/LSCamoflash/blob/v2.01.0000/CHANGELOG.md) for changes.
+
+| Release asset | Intended use |
+| --- | --- |
+| `LSCamoflash-2.01.0000-uclibc.tar.gz` | Full **Anyka** runtime, generated card files and installers. |
+| `update-2.01.0000-uclibc.tgz` | Existing **Anyka** runtime update, excluding `HACK/etc/` and the local root crontab. |
+| `LSCamoflash-2.01.0000-fullhan.tar.gz` | Separate experimental **Fullhan SZ B22705 / 7.6.23** management folder with static ONVIF; credential-free and manually started. |
+| `LSCamoflash-2.01.0000-yyos.tar.gz` | Separate experimental **YYOS 3225722 / SZ F26312 / V14.1.5** management, controls, host recording tools and optional SSH; requires private provisioning. |
+| `LSCamoflash-2.01.0000-backup-kit.tar.gz` | Separate stock NOR backup tools; supported legacy Anyka SD hook and generic collector. YYOS uses its own documented kit. |
+| `LSCamoflash-2.01.0000-source.tar.gz` | Public source and declared build inputs; not a camera installation. |
+| `SHA256SUMS` | Hashes for the other **nine** files; this release has **ten** assets in total. |
+| `THIRD_PARTY_NOTICES.md`, `LICENSE.MIT`, `COPYING.BusyBox` | Component/source notices and license texts; platform archives retain additional component notices and sources. |
+
+### YYOS setup and verified scope
+
+Follow the [YYOS setup guide](yyos-setup.md) for the exact supported stock application identity, download verification, private provisioning and guarded SD installation. The archive contains the fixed host folder `LSCamoflash-yyos-kit/`, its platform-specific `card/` files, installer, source/build provenance and notices. It contains no web credentials, local control key, SSH owner/host keys or SSH enable marker. Provision the web account on your computer; provision optional controls and SSH only when wanted. This kit uses the normal YYOS SD entry, starts management alongside the stock application and does not install the Anyka overlay or Fullhan runtime.
+
+The [management interface](yyos-management.md) provides authenticated status and completed raw recording/metadata downloads. The [host recording converter](yyos-recordings.md) preserves encoded H.264/PCMU packets and their relative timing for the supported unencrypted recording format. Optional [Controls](yyos-controls.md) provides indicator/timestamp switches, fixed short cardinal PTZ steps and Stop, protected by the private local key and authenticated same-origin requests. The owner confirmed working camera rotation after deployment. Optional [SSH](yyos-ssh.md) uses Ed25519 keys, with password login and forwarding disabled.
+
+Short device checks accepted authenticated management, native H.264 main/sub video with PCMU audio, manual ONVIF, owned HTTP restart, recording downloads and bounded horizontal controls. The owner confirmed recorded microphone sound, Tuya app connectivity and camera rotation. The SSH-guarded native setup passed a separate retaining-password trial; legacy unguarded configuration remains blocked. Follow the [native-media safeguards](yyos-native-media.md) rather than assuming that installing management enables streams.
+
+The public static musl SSH replacement passed a temporary-port root/PTY and authorization check; its normal cold boot remains unverified. The earlier normal-boot SSH evidence used a different private build. The rotation confirmation is separate from a new cold boot, vertical/combined app-control behavior and repeated-boot endurance. Detailed app/recording behavior, [VLC playback](yyos-vlc.md), synchronization and long-term stability remain open. A firmware backup does not establish atomic capture, whole-chip coverage or a working restore.
+
+### Existing platforms and publication
+
+For **Anyka 3007325.5 / 6.2863.125.1348**, use [Installation](installation.md) and the [camera guide](camera-3007325.5.md). Local H.265 main/H.264 sub video with PCMA audio and manual ONVIF remain the verified profile behavior. Local mode replaces Tuya app operation and requires explicit Wi-Fi settings; toolkit PTZ and automatic discovery remain unavailable.
+
+For **Fullhan SZ B22705 / 7.6.23**, use the [separate private setup](camera-sz-b22705.md#prepare-the-private-payload). Management and static ONVIF require private credentials and manual startup; camera controls, PTZ, microphone forwarding and automatic startup remain unavailable. The Anyka update archive applies only to an existing Anyka runtime and updates neither Fullhan nor YYOS.
+
+Published archives contain no proprietary camera firmware, device credentials, private logs or actual backups. The backup tools are separate from runtime installation and are not recovery images. The [publication workflow](building.md#publish-a-github-release) publishes checksummed assets from the successful CI build for the exact release commit.
+
 ## Version 2.00.0000 - 2026-10-14
 
 This major release adds a separate experimental Fullhan management package alongside the Anyka runtime. Download the platform-specific archives, `SHA256SUMS` and notices from [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000). The project retains its custom `major.minor.revision` format. See the [2.00.0000 changelog](https://github.com/dev-zetta/LSCamoflash/blob/v2.00.0000/CHANGELOG.md) for changes.

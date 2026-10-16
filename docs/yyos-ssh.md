@@ -8,7 +8,7 @@ SSH grants a root shell to the owner of the authorized private client key. Comma
 
 ## Offline build
 
-For a complete credential-free HTTP/optional SSH package and guarded provisioning, use the [YYOS setup guide](yyos-setup.md). Public packages require the pinned static musl build below; the older private uClibc build remains part of the historical normal-boot evidence.
+For the complete credential-free **v2.01.0000** HTTP/optional SSH package and guarded private provisioning, use the [YYOS setup guide](yyos-setup.md). The public `LSCamoflash-2.01.0000-yyos.tar.gz` package contains the pinned static musl build described below, with SSH disabled until private provisioning. Its temporary-server acceptance is distinct from the older private uClibc build's historical normal-boot evidence.
 
 ```sh
 python3 tools/yyos/build-musl.py --source /private/musl-1.2.6.tar.gz --output /private/musl-build
@@ -59,7 +59,7 @@ Ordinary SD files and logs can be downloaded or uploaded through SSH command inp
 
 ## Source and license provenance
 
-`LICENSE.MIT` covers project-authored runtime and packaging code. `COPYING.BusyBox` retains BusyBox GPLv2 terms; `COPYING.Dropbear` includes the pinned upstream and bundled cryptography notices. The manifest binds the static binaries, runtime sources and supplied build options/source hashes. These checks bind the supplied build report to its binary; they are not an independent attestation of an arbitrary caller-supplied binary. Preserve corresponding BusyBox source/configuration and static toolchain runtime licenses, sources and relinkable build materials before redistributing binaries; see [third-party licenses](../SOURCE/3RD_PARTY_LICENSES.md). This optional private kit is separate from published release assets.
+`LICENSE.MIT` covers project-authored runtime and packaging code. `COPYING.BusyBox` retains BusyBox GPLv2 terms; `COPYING.Dropbear` includes the pinned upstream and bundled cryptography notices. The manifest binds the static binaries, runtime sources and supplied build options/source hashes. These checks bind the supplied build report to its binary; they are not an independent attestation of an arbitrary caller-supplied binary. Preserve corresponding BusyBox source/configuration and static toolchain runtime licenses, sources and relinkable build materials before redistributing binaries; see [third-party licenses](../SOURCE/3RD_PARTY_LICENSES.md). The public v2.01.0000 kit excludes keys and is disabled; the privately provisioned kit contains site keys and must not be published.
 
 ## Current verification
 
@@ -75,7 +75,7 @@ On **2026-10-16**, the owner confirmed connection after normal startup. The pinn
 
 A **32,768-byte** temporary SD file passed upload, same-directory atomic rename, download/hash comparison and cleanup. SSH readback verified the exact stock application and composed root hook, absent debug entry and empty normal marker. Stock PID **446** remained unchanged across system uptime **609.49→1,112.53 seconds**. The SSH master, PID **1317**, used **292 KiB RSS and one thread**; total available RAM was **16,252 then 16,576 KiB** out of 38,112 KiB. These samples do not measure incremental SSH cost.
 
-Authenticated HTTP, native RTSP/ONVIF and Tuya status also passed the [short enabled-normal-boot checks](yyos-native-media.md#native-enabled-normal-boot-short-acceptance). The owner confirmed the app remained Online while SSH/local streams ran. This does not establish every app function, detailed recording, stable repeated boots or long-term use. Public native configuration remains blocked pending separate write-path safeguards.
+Authenticated HTTP, native RTSP/ONVIF and Tuya status also passed the [short enabled-normal-boot checks](yyos-native-media.md#native-enabled-normal-boot-short-acceptance). The owner confirmed the app remained Online while SSH/local streams ran. This does not establish every app function, detailed recording, stable repeated boots or long-term use. Legacy unguarded native configuration remains blocked; the later explicit SSH-guarded setup retained the existing 15-byte password and passed separate short checks.
 
 ## Musl replacement: temporary-port acceptance
 
