@@ -598,6 +598,220 @@ class GuardedConfigurationTests(unittest.TestCase):
         self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
 
 
+class GuardedDisableTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.operation = self.root / 'disable-operation'
+        self.on = snapshot(native_param(PASSWORD, True, True), rtsp_listening='1', onvif_listening='1')
+        self.off = snapshot(native_param(PASSWORD))
+
+    def flow(self, ssh=None, transport=None, operation=None):
+        ssh = ssh or FakeSSH([self.on, self.on, self.off])
+        transport = transport or FakeTransport(statuses=[{'dps': {'237': True, '239': True}},
+                                                         {'dps': {'237': True, '239': True}},
+                                                         {'dps': {'237': False, '239': True}}])
+        result = MEDIA.disable_guarded(credentials(), '192.168.88.17', self.root / 'key',
+                                       self.root / 'hosts', operation or self.operation,
+                                       ssh_factory=lambda *args: ssh, transport_factory=lambda *args: transport)
+        return result, ssh, transport
+
+    def test_one_disable_after_private_durable_preservation_and_fresh_recheck(self):
+        operation = self.operation
+        class CheckedTransport(FakeTransport):
+            def set_value(inner, dp, value):
+                self.assertEqual((operation / 'param-before.conf').read_bytes(), self.on.param)
+                self.assertEqual(operation.stat().st_mode & 0o777, 0o700)
+                self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in operation.iterdir()))
+                for name in ('snapshot-before.json', 'recovery-plan.json', 'attempt-started.json', 'disable-request.json'):
+                    self.assertTrue((operation / name).is_file())
+                return super().set_value(dp, value)
+        fake = CheckedTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2 +
+                                          [{'dps': {'237': False, '239': True}}])
+        result, ssh, _ = self.flow(transport=fake)
+        self.assertTrue(result['disable_attempted'] and result['passwords_unchanged'])
+        self.assertFalse(result['noop'] or result['normal_boot_verified'] or result['write_replay_allowed'])
+        self.assertEqual([call for call in fake.calls if call[0] == 'set'], [('set', 237, False)])
+        self.assertEqual(ssh.calls, 3)
+        self.assertEqual(json.loads((operation / 'attempt-result.json').read_bytes()), result)
+        self.assertIs(MEDIA.NATIVE_ENABLEMENT_ALLOWED, False)
+
+    def test_both_off_is_read_only_noop_but_existing_directory_refuses(self):
+        fake = FakeTransport([{'dps': {'237': False, '239': False}}])
+        result, ssh, _ = self.flow(ssh=FakeSSH([self.off]), transport=fake)
+        self.assertTrue(result['noop'])
+        self.assertFalse(result['disable_attempted'] or result['configuration_written'])
+        self.assertEqual(ssh.calls, 1)
+        self.assertEqual(fake.calls, [('status',), ('close',)])
+        self.assertFalse(self.operation.exists())
+        self.operation.mkdir()
+        factory = mock.Mock()
+        with self.assertRaisesRegex(MEDIA.MediaError, 'operation_directory_exists_do_not_replay'):
+            MEDIA.disable_guarded(credentials(), '192.168.88.17', 'key', 'hosts', self.operation,
+                                  ssh_factory=factory)
+        factory.assert_not_called()
+
+    def test_missing_flags_use_proven_default_off_only_for_read_only_noop(self):
+        for param in (b'[dp]\nsiren_onoff=0\n', b'[rtsp]\nrtsp_on_off=0\n'):
+            fake = FakeTransport([{'dps': {'237': False, '239': False}}])
+            result, _, _ = self.flow(ssh=FakeSSH([snapshot(param)]), transport=fake)
+            self.assertTrue(result['noop'])
+            self.assertFalse(result['disable_attempted'] or self.operation.exists())
+            self.assertEqual(fake.calls, [('status',), ('close',)])
+
+    def test_partial_flags_or_listener_mismatch_refuse_before_tuya_and_journal(self):
+        for state in (snapshot(native_param(PASSWORD, True, False)),
+                      snapshot(native_param(PASSWORD, False, True)),
+                      snapshot(native_param(PASSWORD, True, True)),
+                      snapshot(rtsp_listening='1'), snapshot(onvif_listening='1')):
+            factory = mock.Mock()
+            with self.subTest(flags=state.flags), self.assertRaisesRegex(MEDIA.MediaError, 'native_service_state_mismatch'):
+                MEDIA.disable_guarded(credentials(), '192.168.88.17', 'key', 'hosts', self.operation,
+                                      ssh_factory=lambda *args: FakeSSH([state]), transport_factory=factory)
+            factory.assert_not_called()
+            self.assertFalse(self.operation.exists())
+
+    def test_incomplete_or_mismatched_tuya_state_refuses_before_preservation(self):
+        for state, response in ((self.on, {'dps': {'237': False, '239': True}}),
+                                (self.off, {'dps': {'237': True, '239': True}}),
+                                (self.on, {'dps': {'237': True}}),
+                                (self.on, {'dps': {'237': True, '239': 'true'}})):
+            fake = FakeTransport([response])
+            with self.subTest(response=response), self.assertRaises(MEDIA.MediaError):
+                self.flow(ssh=FakeSSH([state]), transport=fake)
+            self.assertFalse(self.operation.exists())
+            self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+
+    def test_full_config_identity_or_tuya_race_never_writes(self):
+        for index, fresh in enumerate((snapshot(self.on.param + b'; changed full bytes\n',
+                                               rtsp_listening='1', onvif_listening='1'),
+                                       snapshot(self.on.param, stock_start_time='101',
+                                                rtsp_listening='1', onvif_listening='1'))):
+            fake = FakeTransport([{'dps': {'237': True, '239': True}}])
+            with self.subTest(index=index), self.assertRaisesRegex(MEDIA.MediaError, 'live_state_changed_before_write'):
+                self.flow(ssh=FakeSSH([self.on, fresh]), transport=fake, operation=self.root / ('race-' + str(index)))
+            self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+        fake = FakeTransport([{'dps': {'237': True, '239': True}}, {'dps': {'237': True, '239': False}}])
+        with self.assertRaisesRegex(MEDIA.MediaError, 'live_state_changed_before_write'):
+            self.flow(ssh=FakeSSH([self.on, self.on]), transport=fake)
+        self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+
+    def test_backup_or_request_journal_failure_never_writes(self):
+        original = MEDIA.private_new
+        for name in ('param-before.conf', 'snapshot-before.json', 'recovery-plan.json',
+                     'attempt-started.json', 'disable-request.json'):
+            def fail(path, data):
+                if path.name == name:
+                    raise OSError('private synthetic failure ' + PASSWORD + LOCAL_KEY)
+                return original(path, data)
+            fake = FakeTransport([{'dps': {'237': True, '239': True}}] * 2)
+            with self.subTest(name=name), mock.patch.object(MEDIA, 'private_new', side_effect=fail):
+                with self.assertRaises(MEDIA.MediaError) as caught:
+                    self.flow(transport=fake, operation=self.root / name)
+            self.assertFalse(caught.exception.disable_attempted)
+            self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+            self.assertNotIn(PASSWORD, str(caught.exception))
+
+    def test_real_directory_or_backup_file_fsync_failure_blocks_disable_write(self):
+        original = os.fsync
+        for failed_call in (1, 2):
+            count = [0]
+            def fail(descriptor):
+                count[0] += 1
+                if count[0] == failed_call:
+                    raise OSError('private synthetic failure ' + PASSWORD)
+                return original(descriptor)
+            fake = FakeTransport([{'dps': {'237': True, '239': True}}])
+            with self.subTest(failed_call=failed_call), mock.patch.object(MEDIA.os, 'fsync', side_effect=fail):
+                with self.assertRaises(MEDIA.MediaError) as caught:
+                    self.flow(transport=fake, operation=self.root / ('fsync-' + str(failed_call)))
+            self.assertEqual(caught.exception.phase, 'preservation')
+            self.assertFalse(caught.exception.disable_attempted)
+            self.assertFalse(any(call[0] == 'set' for call in fake.calls))
+
+    def test_ambiguous_ack_or_transport_exception_verifies_read_only_without_replay(self):
+        for index, response in enumerate((None, {'Error': PASSWORD, 'Err': '901'})):
+            fake = FakeTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2 +
+                                          [{'dps': {'237': False, '239': True}}], writes=[response])
+            result, _, _ = self.flow(transport=fake, operation=self.root / ('ack-' + str(index)))
+            self.assertEqual(result['disable_response'], 'not_reported' if response is None else 'ambiguous')
+            self.assertEqual([call for call in fake.calls if call[0] == 'set'], [('set', 237, False)])
+        class RaisedTransport(FakeTransport):
+            def set_value(inner, dp, value):
+                inner.calls.append(('set', dp, value))
+                raise TimeoutError(PASSWORD + LOCAL_KEY)
+        fake = RaisedTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2 +
+                                        [{'dps': {'237': False, '239': True}}])
+        result, _, _ = self.flow(transport=fake)
+        self.assertEqual(result['disable_response'], 'ambiguous')
+        self.assertEqual([call for call in fake.calls if call[0] == 'set'], [('set', 237, False)])
+
+    def test_delayed_partial_transition_is_bounded_to_five_reads_four_sleeps(self):
+        transition = snapshot(native_param(PASSWORD, False, True), onvif_listening='1')
+        fake = FakeTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2 +
+                                      [{'dps': {'237': False, '239': True}}])
+        with mock.patch.object(MEDIA.time, 'sleep') as sleep:
+            result, ssh, _ = self.flow(ssh=FakeSSH([self.on, self.on] + [transition] * 4 + [self.off]), transport=fake)
+        self.assertTrue(result['both_native_flags_off'])
+        self.assertEqual(ssh.calls, 7)
+        self.assertEqual(sleep.call_args_list, [mock.call(1)] * 4)
+        fake = FakeTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2)
+        with mock.patch.object(MEDIA.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(MEDIA.MediaError, 'native_disable_readback_timeout') as caught:
+                self.flow(ssh=FakeSSH([self.on] * 7), transport=fake, operation=self.root / 'timeout')
+        self.assertTrue(caught.exception.disable_attempted and caught.exception.operation_journal_preserved)
+        self.assertEqual(sleep.call_count, 4)
+        self.assertEqual([call for call in fake.calls if call[0] == 'set'], [('set', 237, False)])
+
+    def test_post_write_identity_or_password_change_refuses_without_rollback(self):
+        for name, changed in (('identity', snapshot(self.off.param, stock_start_time='101')),
+                              ('password', snapshot(native_param('ChangedAbc123')))):
+            fake = FakeTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2)
+            with self.subTest(name=name), self.assertRaises(MEDIA.MediaError) as caught:
+                self.flow(ssh=FakeSSH([self.on, self.on, changed]), transport=fake, operation=self.root / name)
+            self.assertTrue(caught.exception.disable_attempted)
+            self.assertEqual([call for call in fake.calls if call[0] == 'set'], [('set', 237, False)])
+
+    def test_final_tuya_requires_one_complete_off_response_and_unchanged_password_state(self):
+        for index, responses in enumerate(([{'dps': {'237': False}}, {'dps': {'239': True}}, {'dps': {'237': False}}],
+                                            [{'dps': {'237': True, '239': True}}],
+                                            [{'dps': {'237': False, '239': False}}])):
+            fake = FakeTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2 + responses)
+            with self.subTest(index=index), self.assertRaises(MEDIA.MediaError):
+                self.flow(transport=fake, operation=self.root / ('status-' + str(index)))
+            self.assertEqual([call for call in fake.calls if call[0] == 'set'], [('set', 237, False)])
+            self.assertLessEqual(sum(call == ('status',) for call in fake.calls), 5)
+
+    def test_failed_attempt_cannot_replay_before_any_provider(self):
+        fake = FakeTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2)
+        with mock.patch.object(MEDIA.time, 'sleep'), self.assertRaises(MEDIA.MediaError):
+            self.flow(ssh=FakeSSH([self.on] * 7), transport=fake)
+        factory = mock.Mock()
+        with self.assertRaisesRegex(MEDIA.MediaError, 'operation_directory_exists_do_not_replay'):
+            MEDIA.disable_guarded(credentials(), '192.168.88.17', 'key', 'hosts', self.operation,
+                                  ssh_factory=factory)
+        factory.assert_not_called()
+
+    def test_cli_needs_no_password_and_failure_serializes_attempt_without_secrets(self):
+        identity = private_file(self.root / 'credentials', json.dumps(credentials()).encode())
+        fake = FakeTransport(statuses=[{'dps': {'237': True, '239': True}}] * 2)
+        output = io.StringIO()
+        with mock.patch.object(MEDIA, 'SSHProfile', return_value=FakeSSH([self.on] * 7)), \
+                mock.patch.object(MEDIA, 'TuyaTransport', return_value=fake), \
+                mock.patch.object(MEDIA.time, 'sleep'), contextlib.redirect_stdout(output):
+            code = MEDIA.main(['disable-guarded', '--credentials', str(identity), '--host', '192.168.88.17',
+                               '--ssh-key', str(self.root / 'key'), '--ssh-known-hosts', str(self.root / 'hosts'),
+                               '--operation-directory', str(self.operation)])
+        self.assertEqual(code, 1)
+        result = json.loads(output.getvalue())
+        self.assertTrue(result['disable_attempted'] and result['operation_journal_preserved'])
+        self.assertEqual((result['error'], result['phase']), ('native_disable_readback_timeout', 'disabled_readback'))
+        self.assertNotIn('password_change_acknowledged', result)
+        for value in (PASSWORD, LOCAL_KEY, DEVICE_ID):
+            self.assertNotIn(value, output.getvalue())
+
+
 class SSHProviderTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

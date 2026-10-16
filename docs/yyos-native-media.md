@@ -80,6 +80,21 @@ New guarded passwords must be **8–15 ASCII letters and digits**, including upp
 
 **The new guarded write path has not yet passed a physical configuration trial.** Its 57 focused offline tests passed, including malformed/duplicate configuration, active flags/listeners, identity/configuration races, preservation failures, actual private-directory/file permission failures, ambiguous acknowledgements and replay refusal. The fixed snapshot script passed ARM926 shell syntax checks. A live `preflight-guarded` against the already enabled camera returned `native_services_must_be_off` before any Tuya transport or configuration write. This verifies the enabled-state refusal, not the off-state write sequence. The legacy `configure` gate remains false.
 
+### Disable native services before guarded setup
+
+`disable-guarded` separately requests both native services off without changing their passwords. It requires the same pinned owner SSH identity, coherent configuration flags and listeners, and complete authenticated Tuya status. An already-off camera returns a read-only no-op. An enabled camera requires a new absolute private operation directory; the helper preserves its configuration and recovery notes, flushes the journal, and rechecks identity and the complete configuration before sending DP237=false once. Existing journals always refuse replay.
+
+```sh
+"$PYTHON" tools/yyos/native-media.py disable-guarded \
+  --credentials /absolute/private/path/yyos-native-credentials.json \
+  --host "$CAMERA_IP" \
+  --ssh-key /absolute/private/path/owner_ssh_ed25519 \
+  --ssh-known-hosts /absolute/private/path/camera-known-hosts \
+  --operation-directory /absolute/private/path/new-disable-operation
+```
+
+After that single request, bounded read-only checks require unchanged application identity and passwords, both flags off, both listeners absent, and complete Tuya status agreeing with the result. A missing or ambiguous acknowledgement permits those reads but never another write, password change, automatic restore or process restart. The command interrupts existing native streams. Its 71 focused offline tests include preservation failures, state races, ambiguous delivery, timeout, unchanged passwords, replay refusal and the already-off no-op; physical acceptance is recorded separately.
+
 ## Guarded 15-byte trial: bounded acceptance
 
 One separately controlled native setup attempt used a **15-byte password**. Its retained result was **`invalid_status_response` at `final_status`**, with password acknowledgement true and enable attempt true. The actual final reply was not captured. A fresh, separate authenticated Tuya query subsequently returned **DP237 true / DP239 true**, while HTTP status showed uptime **239 seconds**, stock/management running, both native listeners present and **16,664 KiB available RAM**. A later sample reached **1,324 seconds**, with stock/management and both listeners still present, **16,504 KiB available RAM**, **648 KiB HTTP RSS** and **10,100 KiB stock RSS**. These independent checks establish enabled services despite the ambiguous command result; they do not turn the original result into a successful reply or justify replaying either write.

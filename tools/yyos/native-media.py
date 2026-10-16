@@ -7,6 +7,8 @@ and `preflight-guarded` only read. Legacy `configure` remains blocked. The expli
 `configure-guarded` path requires a pinned owner SSH session, both services off,
 a durable private configuration backup and a new one-attempt journal directory.
 Guarded writes require alphanumeric passwords and never auto-disable or replay.
+`disable-guarded` separately permits one preserved both-on to both-off attempt,
+without changing passwords; partial or mismatched initial states are refused.
 New passwords are limited to 8–15 ASCII bytes: this firmware copies them into
 16-byte native RTSP/ONVIF caches including the terminating NUL.
 The stock DP238 handler logs its password request: subsequent raw camera logs
@@ -54,6 +56,7 @@ PRIVATE_FIELDS = {'format', 'profile', 'firmware_version', 'app_sha256',
 CONFIGURE_PHASES = {'initial_status', 'password_request', 'password_confirmation',
                     'media_enable', 'final_status', 'ssh_preflight', 'preservation',
                     'ssh_recheck', 'password_readback', 'enabled_readback', 'operation_record'}
+DISABLE_READBACK_ATTEMPTS = 5
 SSH_BUSYBOX_SHA = '052b061b58196c56792b6e950fa6535f2c89732b311adfdd815521213e625aa8'
 SSH_OUTPUT_LIMIT = 100 * 1024
 SSH_READ_TIMEOUT = 30
@@ -282,6 +285,8 @@ class MediaError(Exception):
         self.media_enable_attempted = False
         self.guarded_operation = False
         self.operation_journal_preserved = False
+        self.disable_attempted = False
+        self.guarded_disable_operation = False
 
 
 class SafeArgumentParser(argparse.ArgumentParser):
@@ -939,30 +944,191 @@ def configure_guarded(credentials, host, password, client_key, known_hosts, oper
     return result
 
 
+def native_service_state(snapshot):
+    on = all(snapshot.flags.values()) and all(snapshot.metadata[name] == '1'
+              for name in ('rtsp_listening', 'onvif_listening'))
+    off = not any(snapshot.flags.values()) and all(snapshot.metadata[name] == '0'
+              for name in ('rtsp_listening', 'onvif_listening'))
+    require(on or off, 'native_service_state_mismatch')
+    return on
+
+
+def verified_disabled_status(transport, password_set):
+    # Async notifications must not be merged into a complete status response.
+    for _ in range(3):
+        response = transport.status()
+        response_error(response)
+        require(type(response) is dict and type(response.get('dps')) is dict,
+                'invalid_status_response')
+        dps = response['dps']
+        require(all(number not in dps or type(dps[number]) is bool for number in ('237', '239')),
+                'missing_media_status')
+        if '237' in dps and '239' in dps:
+            status = safe_status(response)
+            require(status['dp237'] is False and status['dp239'] is password_set,
+                    'media_disable_verification_failed')
+            return status
+        require(bool(dps) and set(dps) <= {'237', '239'}, 'invalid_status_response')
+    raise MediaError('missing_media_status')
+
+
+def guarded_disable_failure(error):
+    result = {'ok': False, 'error': error.code, 'phase': error.phase,
+              'disable_attempted': error.disable_attempted, 'guarded_operation': True,
+              'operation_journal_preserved': error.operation_journal_preserved,
+              'write_replay_allowed': False}
+    if error.native_errcode is not None:
+        result['native_errcode'] = error.native_errcode
+    return result
+
+
+def disable_guarded(credentials, host, client_key, known_hosts, operation_directory,
+                    timeout=3, retries=0, ssh_factory=None, transport_factory=None):
+    """One routine disable attempt; unknown outcomes permit reads, never replay."""
+    transport = None
+    phase = 'ssh_preflight'
+    attempted = journal = created = False
+    directory = Path(operation_directory)
+    result = error = None
+    response_state = 'not_sent'
+    try:
+        validate_credentials(credentials)
+        validate_target(host, timeout, retries)
+        require(directory.is_absolute() and not any(path.is_symlink() for path in (directory, *directory.parents)),
+                'unsafe_operation_directory')
+        require(not directory.exists(), 'operation_directory_exists_do_not_replay')
+        ssh = (ssh_factory or SSHProfile)(host, client_key, known_hosts, timeout)
+        snapshot = ssh.snapshot()
+        enabled = native_service_state(snapshot)
+        transport = (transport_factory or TuyaTransport)(credentials, host, timeout, retries)
+        initial_status = safe_status(transport.status())
+        require(initial_status['dp237'] is enabled, 'native_service_state_mismatch')
+        if not enabled:
+            return {'ok': True, 'profile': PROFILE, 'guarded_operation': True, 'noop': True,
+                    'disable_attempted': False, 'configuration_written': False,
+                    'both_native_flags_off': True, 'native_listeners_absent': True,
+                    'operation_journal_preserved': False, 'write_replay_allowed': False,
+                    'status': initial_status}
+        phase = 'preservation'
+        directory.mkdir(mode=0o700)
+        private_directory(directory)
+        created = True
+        sync_directory(directory.parent)
+        private_new(directory / 'param-before.conf', snapshot.param)
+        private_json(directory / 'snapshot-before.json',
+                     {key: value for key, value in snapshot.metadata.items() if key != 'param_base64'})
+        private_json(directory / 'recovery-plan.json', {
+            'profile': PROFILE, 'operation': 'disable-guarded',
+            'original_configuration': 'param-before.conf', 'automatic_rollback': False,
+            'raw_flash_write': False, 'whole_configuration_restore': False,
+            'password_change_requested': False,
+            'ambiguous_result': 'Read status only; retain this journal and do not replay writes.',
+            'offline_recovery': 'Use the exact-profile reviewed recovery procedure only after owner review.',
+        })
+        private_json(directory / 'attempt-started.json', {
+            'format': 'lscamoflash-yyos-guarded-native-disable-v1', 'profile': PROFILE,
+            'host': host, 'created_unix_seconds': int(time.time()), 'app_sha256': APP_SHA256,
+            'configuration_before_sha256': snapshot.sha256, 'original_preserved': True,
+            'password_change_requested': False, 'write_replay_allowed': False,
+        })
+        journal = True
+        phase = 'ssh_recheck'
+        fresh = ssh.snapshot()
+        require(fresh.identity == snapshot.identity and fresh.sha256 == snapshot.sha256,
+                'live_state_changed_before_write')
+        require(native_service_state(fresh), 'live_state_changed_before_write')
+        require(safe_status(transport.status()) == initial_status, 'live_state_changed_before_write')
+        phase = 'disable_request'
+        private_json(directory / 'disable-request.json', {'dp': 237, 'value': False,
+                     'single_attempt_only': True, 'password_change_requested': False})
+        attempted = True
+        try:
+            response = transport.set_value(237, False)
+            response_error(response)
+            response_state = 'received' if response is not None else 'not_reported'
+        except Exception:
+            # The write may have reached the device. Only read-only evidence
+            # can resolve this; no exception permits a second write.
+            response_state = 'ambiguous'
+        phase = 'disabled_readback'
+        disabled = None
+        for attempt in range(DISABLE_READBACK_ATTEMPTS):
+            current = ssh.snapshot()
+            require(current.identity == snapshot.identity, 'live_identity_changed')
+            require(all(hmac.compare_digest(current.passwords[name], snapshot.passwords[name])
+                        for name in ('rtsp', 'onvif')), 'native_password_changed_during_disable')
+            if not any(current.flags.values()) and all(current.metadata[name] == '0'
+                    for name in ('rtsp_listening', 'onvif_listening')):
+                disabled = current
+                break
+            if attempt + 1 < DISABLE_READBACK_ATTEMPTS:
+                time.sleep(1)
+        require(disabled is not None, 'native_disable_readback_timeout')
+        phase = 'final_status'
+        status = verified_disabled_status(transport, initial_status['dp239'])
+        private_json(directory / 'disabled-readback.json', {
+            'configuration_sha256': disabled.sha256, 'both_flags_off': True,
+            'native_listeners_absent': True, 'passwords_unchanged': True,
+        })
+        result = {'ok': True, 'profile': PROFILE, 'guarded_operation': True, 'noop': False,
+                  'disable_attempted': True, 'disable_response': response_state,
+                  'both_native_flags_off': True, 'native_listeners_absent': True,
+                  'passwords_unchanged': True, 'operation_journal_preserved': True,
+                  'write_replay_allowed': False, 'normal_boot_verified': False, 'status': status}
+    except MediaError as caught:
+        error = caught
+    except BaseException:
+        error = MediaError('guarded_disable_failed')
+    finally:
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+    if error is not None:
+        error.phase, error.disable_attempted = phase, attempted
+        error.guarded_operation, error.guarded_disable_operation = True, True
+        error.operation_journal_preserved = journal
+        result = guarded_disable_failure(error)
+    if created:
+        try:
+            private_json(directory / 'attempt-result.json', result)
+        except Exception:
+            if error is None:
+                error = MediaError('operation_record_failed')
+                error.phase, error.disable_attempted = 'operation_record', attempted
+                error.guarded_operation, error.guarded_disable_operation = True, True
+                error.operation_journal_preserved = journal
+    if error is not None:
+        raise error
+    return result
+
+
 def main(argv=None):
     parser = SafeArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest='command', required=True)
     credentials = subparsers.add_parser('credentials', help='offline verified-backup recovery; never prints keys')
     credentials.add_argument('--backup-run', type=Path, required=True)
     credentials.add_argument('--output', type=Path, required=True, help='new private0600 JSON; never overwritten')
-    for command in ('status', 'configure', 'preflight-guarded', 'configure-guarded'):
+    for command in ('status', 'configure', 'preflight-guarded', 'configure-guarded', 'disable-guarded'):
         helps = {'status': 'read-only Tuya status', 'configure': 'blocked legacy write path',
                  'preflight-guarded': 'read-only fresh SSH/Tuya eligibility check',
-                 'configure-guarded': 'one guarded attempt; requires both native services already off'}
+                 'configure-guarded': 'one guarded attempt; requires both native services already off',
+                 'disable-guarded': 'one preserved both-on to both-off attempt; no password change'}
         sub = subparsers.add_parser(command, help=helps[command])
         sub.add_argument('--credentials', type=Path, required=True)
         sub.add_argument('--host', required=True, help='explicit RFC1918 IPv4 address; no autodiscovery/cloud')
         sub.add_argument('--timeout', type=float, default=3, help='socket timeout1..10seconds')
         sub.add_argument('--retries', type=int, default=0, help='additional connection attempts0..2; writes never replayed')
-        if command != 'status':
+        if command not in ('status', 'disable-guarded'):
             sub.add_argument('--password-file', type=Path, required=True,
                              help='private new password; guarded commands require8..15ASCIIletters/digits and all3classes')
             sub.add_argument('--old-password-file', type=Path,
                              help='required when DP239 is true; omitted only for the firmware default-password state')
-        if command in ('preflight-guarded', 'configure-guarded'):
+        if command in ('preflight-guarded', 'configure-guarded', 'disable-guarded'):
             sub.add_argument('--ssh-key', type=Path, required=True, help='private owner OpenSSH key file')
             sub.add_argument('--ssh-known-hosts', type=Path, required=True, help='private exact Ed25519 host pin for TCP2222')
-        if command == 'configure-guarded':
+        if command in ('configure-guarded', 'disable-guarded'):
             sub.add_argument('--operation-directory', type=Path, required=True,
                              help='new absolute private backup/journal directory; an existing path is never replayed')
     args = parser.parse_args(argv)
@@ -973,6 +1139,9 @@ def main(argv=None):
             identity = load_credentials(args.credentials)
             if args.command == 'status':
                 result = request_status(identity, args.host, args.timeout, args.retries)
+            elif args.command == 'disable-guarded':
+                result = disable_guarded(identity, args.host, args.ssh_key, args.ssh_known_hosts,
+                                         args.operation_directory, args.timeout, args.retries)
             else:
                 password = password_file(args.password_file)
                 old_password = password_file(args.old_password_file, old=True) if args.old_password_file else None
@@ -985,6 +1154,9 @@ def main(argv=None):
                     result = configure_guarded(identity, args.host, password, args.ssh_key, args.ssh_known_hosts,
                                                args.operation_directory, old_password, args.timeout, args.retries)
     except MediaError as error:
+        if error.guarded_disable_operation:
+            print(json.dumps(guarded_disable_failure(error), sort_keys=True))
+            return 1
         result = {'ok': False, 'error': error.code}
         if error.native_errcode is not None:
             result['native_errcode'] = error.native_errcode
