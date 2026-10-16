@@ -597,6 +597,44 @@ class GuardedConfigurationTests(unittest.TestCase):
         self.assertEqual(sum(call == ('status',) for call in fake.calls), 5)
         self.assertEqual([call[1] for call in fake.calls if call[0] == 'set'], [238, 237])
 
+    def test_final_verification_uses_new_read_session_after_closing_write_socket(self):
+        writer = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2,
+                               writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        # A complete status may also contain an unrelated current DP238 value;
+        # that value is neither a password acknowledgement nor public output.
+        reader = FakeTransport(statuses=[{'dps': {'237': True, '239': True,
+                                                   '238': 'PRIVATE-CURRENT-VALUE', '101': True}}])
+        def factory(*args):
+            if not writer.calls:
+                return writer
+            self.assertEqual(writer.calls[-1], ('close',))
+            return reader
+        result = MEDIA.configure_guarded(credentials(), '192.168.88.17', PASSWORD, 'key', 'hosts',
+                                         self.operation, old_password=OLD_GUARDED,
+                                         ssh_factory=lambda *args: FakeSSH([self.initial, self.initial,
+                                                                           self.changed, self.enabled]),
+                                         transport_factory=factory)
+        self.assertTrue(result['configuration_readback_verified'])
+        self.assertEqual(reader.calls, [('status',), ('close',)])
+        self.assertEqual([call[1] for call in writer.calls if call[0] == 'set'], [238, 237])
+        self.assertNotIn('PRIVATE-CURRENT-VALUE', json.dumps(result))
+
+    def test_new_read_session_failure_never_replays_a_write(self):
+        writer = FakeTransport(statuses=[{'dps': {'237': False, '239': True}}] * 2,
+                               writes=[{'dps': {'238': '{"res":"ok"}'}}])
+        factory = mock.Mock(side_effect=[writer, TimeoutError('synthetic private ' + LOCAL_KEY)])
+        with self.assertRaises(MEDIA.MediaError) as caught:
+            MEDIA.configure_guarded(credentials(), '192.168.88.17', PASSWORD, 'key', 'hosts',
+                                    self.operation, old_password=OLD_GUARDED,
+                                    ssh_factory=lambda *args: FakeSSH([self.initial, self.initial,
+                                                                      self.changed, self.enabled]),
+                                    transport_factory=factory)
+        self.assertEqual(caught.exception.phase, 'final_status')
+        self.assertTrue(caught.exception.media_enable_attempted)
+        self.assertEqual([call[1] for call in writer.calls if call[0] == 'set'], [238, 237])
+        self.assertEqual(writer.calls[-1], ('close',))
+        self.assertNotIn(LOCAL_KEY, str(caught.exception))
+
 
 class GuardedDisableTests(unittest.TestCase):
     def setUp(self):

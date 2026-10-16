@@ -651,11 +651,14 @@ def verified_media_status(transport):
         for number in ('237', '239'):
             require(number not in dps or type(dps[number]) is bool, 'missing_media_status')
         if '238' in dps:
-            require(password_result(response), 'invalid_password_response')
+            require(type(dps['238']) is str and len(dps['238']) <= 255,
+                    'invalid_password_response')
         if '237' in dps and '239' in dps:
             after = safe_status(response)
             require(after['dp237'] is True and after['dp239'] is True, 'media_verification_failed')
             return after
+        if '238' in dps:
+            require(password_result(response), 'invalid_password_response')
         require(bool(dps) and set(dps) <= {'237', '238', '239'}, 'invalid_status_response')
     raise MediaError('missing_media_status')
 
@@ -910,6 +913,12 @@ def configure_guarded(credentials, host, password, client_key, known_hosts, oper
                 all(hmac.compare_digest(value, password) for value in enabled.passwords.values()),
                 'native_configuration_readback_failed')
         phase = 'final_status'
+        # The single-write socket has retries disabled and may hold queued
+        # acknowledgements. Start an independent authenticated read session;
+        # never reconnect or replay either configuration write.
+        transport.close()
+        transport = None
+        transport = (transport_factory or TuyaTransport)(credentials, host, timeout, retries)
         status = verified_media_status(transport)
         result = {'ok': True, 'profile': PROFILE, 'guarded_operation': True,
                   'password_change_acknowledged': True, 'media_enable_attempted': True,
@@ -1065,6 +1074,9 @@ def disable_guarded(credentials, host, client_key, known_hosts, operation_direct
                 time.sleep(1)
         require(disabled is not None, 'native_disable_readback_timeout')
         phase = 'final_status'
+        transport.close()
+        transport = None
+        transport = (transport_factory or TuyaTransport)(credentials, host, timeout, retries)
         status = verified_disabled_status(transport, initial_status['dp239'])
         private_json(directory / 'disabled-readback.json', {
             'configuration_sha256': disabled.sha256, 'both_flags_off': True,
