@@ -1,6 +1,6 @@
 # LSCamoflash
 
-Local camera tools for compatible LSC / Tuya cameras: a web interface, RTSP integration and firmware backup utilities running from a microSD card. **Anyka and Fullhan cameras use separate packages**, with features determined by their exact stock firmware.
+Local camera tools for compatible LSC / Tuya cameras: a web interface, RTSP integration and firmware backup utilities running from a microSD card. **Anyka and Fullhan cameras use separate release packages. YYOS has a separate source-built pilot**, with features determined by the exact stock firmware.
 
 [![Release](https://img.shields.io/github/v/release/dev-zetta/LSCamoflash)](https://github.com/dev-zetta/LSCamoflash/releases/latest)
 [![Build-Test](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml/badge.svg)](https://github.com/dev-zetta/LSCamoflash/actions/workflows/makefile.yml)
@@ -12,7 +12,7 @@ Local camera tools for compatible LSC / Tuya cameras: a web interface, RTSP inte
 
 - Watch supported cameras through local RTSP and connect an ONVIF client.
 - View camera status, CPU, memory and SD information in a browser.
-- Browse and download finalized recordings with the experimental Fullhan interface.
+- Browse and download finalized recordings with the experimental Fullhan and YYOS interfaces.
 - Change settings and configure Wi-Fi/services on supported Anyka profiles.
 - Back up stock firmware with the separate, documented NOR tools.
 
@@ -20,13 +20,14 @@ Streaming, audio, motor control and startup differ between platforms. Check the 
 
 ## Choose the package for your camera
 
-| Tested camera | Download from v2.00.0000 | Setup |
+| Tested camera | Package or availability | Setup |
 | --- | --- | --- |
 | **Anyka LSC Smart PTZ**, SI L25502 / article 3007325.5, firmware `6.2863.125.1348` | `LSCamoflash-2.00.0000-uclibc.tar.gz` | [3007325.5 guide](docs/camera-3007325.5.md) |
 | **Fullhan LSC Indoor 1080p**, SZ B22705 / FH8626V100, firmware `7.6.23` | `LSCamoflash-2.00.0000-fullhan.tar.gz` | [Fullhan guide](docs/camera-sz-b22705.md) |
+| **YYOS LSC 3225722**, SZ F26312, firmware `14.1.5` | Source-built pilot; release pending | [YYOS guide](docs/camera-3225722.md) |
 | **Firmware backup only** | `LSCamoflash-2.00.0000-backup-kit.tar.gz` | [Anyka SD backup](docs/firmware-backup.md) or [Fullhan manual collector](docs/camera-sz-b22705.md#manual-backup-through-the-stock-shell) |
 
-Download `SHA256SUMS` too and verify your chosen archive. The Anyka update package is for an existing Anyka runtime; it does not install or update the Fullhan interface. The backup kit’s SD boot launcher applies to supported Anyka cameras, while Fullhan uses its separate manual entry.
+**Published v2.00.0000 contains the Anyka and Fullhan packages; it does not contain YYOS.** Download `SHA256SUMS` too and verify your chosen archive. The Anyka update package is for an existing Anyka runtime; it does not install or update the Fullhan interface. The backup kit’s SD boot launcher applies to supported Anyka cameras, while Fullhan uses its separate manual entry.
 
 **Anyka 3007325.5:** verified functions include Wi-Fi, web UI login, H.265 main video, H.264 sub video and PCMA microphone audio. Manual ONVIF selects the H.264 substream. Local streaming replaces Tuya app operation and requires explicit Wi-Fi settings; automatic ONVIF discovery and toolkit PTZ are unavailable on this profile.
 
@@ -34,17 +35,17 @@ Download `SHA256SUMS` too and verify your chosen archive. The Anyka update packa
 
 Other Anyka profiles are inherited from upstream, including IPC-XC-C323 support. See the [compatibility and integration notes](docs/integration.md). A matching product name alone does not establish compatibility, and short live checks do not establish long-term stability.
 
-**LSC 3225722 / SZ F26312, firmware V14.1.5:** [investigation is in progress](docs/camera-3225722.md). No matching runtime package is available yet.
+**YYOS 3225722 / SZ F26312:** the separate [source-built pilot](docs/yyos-management.md) provides authenticated status and recording downloads, with a [host recording converter](docs/yyos-recordings.md). Short device checks accepted native H.264/PCMU streaming, manual ONVIF, optional key-only SSH and owner-reported Tuya app connectivity. Optional [indicator/timestamp controls and short PTZ steps](docs/yyos-controls.md) are installed and passed bounded checks; repeated boots, detailed app behavior and long-term operation remain unverified. See the [native-media safeguards](docs/yyos-native-media.md) and [unresolved VLC playback investigation](docs/yyos-vlc.md).
 
 ## Get started
 
 1. **Check your camera and firmware.** Choose its platform-specific guide above.
 2. **Make a backup.** Save existing SD recordings and follow the applicable firmware backup procedure. Keep dumps and credentials private.
-3. **Download and verify the matching package.** Use [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) and `SHA256SUMS`.
-4. **Prepare the card using your camera guide.** The [Anyka installation guide](docs/installation.md) covers its layouts and installers. The [Fullhan setup](docs/camera-sz-b22705.md#prepare-the-private-payload) uses its own named folder, private credentials and manual startup.
-5. **Open `http://<camera-ip>:8080/`.** A fresh **Anyka** web UI uses `admin` / `admin`; change it through **Password**. **Fullhan has no default password** and uses the account you provisioned. Its independent ONVIF account is separate.
+3. **Choose the matching package or pilot.** For Anyka or Fullhan, download [v2.00.0000](https://github.com/dev-zetta/LSCamoflash/releases/tag/v2.00.0000) and verify `SHA256SUMS`. For YYOS, follow its [source build and private setup](docs/yyos-management.md#build-a-private-kit); neither release runtime applies.
+4. **Prepare the card using your camera guide.** The [Anyka installation guide](docs/installation.md) covers its layouts and installers. The [Fullhan setup](docs/camera-sz-b22705.md#prepare-the-private-payload) uses its own named folder, private credentials and manual startup. The [YYOS guide](docs/yyos-management.md#stage-the-card) describes its separate normal-boot SD entry.
+5. **Open `http://<camera-ip>:8080/`.** A fresh **Anyka** web UI uses `admin` / `admin`; change it through **Password**. **Fullhan and YYOS have no default web password** and use the account you provisioned. Media and SSH credentials are separate from the web account.
 
-Published packages need no compilation. Fullhan still requires local credential provisioning; neither copying its public archive nor rebooting the camera starts the services automatically.
+Published Anyka and Fullhan packages need no compilation. Fullhan still requires local credential provisioning; neither copying its public archive nor rebooting the camera starts the services automatically. The YYOS pilot requires a source build and private credentials; its release is pending.
 
 Use a spare card and back up before changing it: the Anyka partitioning scripts erase the selected disk. Stock startup can change persistent camera configuration, so removing an SD card does not guarantee complete rollback. Use the software only on devices you own or may modify; see the [usage policy](USAGE_POLICY.md).
 
@@ -55,6 +56,7 @@ Use a spare card and back up before changing it: the Anyka partitioning scripts 
 | Choose a release or install Anyka | [Release notes](docs/release.md) and [installation](docs/installation.md) |
 | Set Anyka passwords, services or streaming | [Configuration and everyday use](docs/configuration.md) |
 | Set up Fullhan management and recordings | [Fullhan SZ B22705 guide](docs/camera-sz-b22705.md) |
+| Set up the YYOS pilot and recordings | [YYOS management](docs/yyos-management.md), [recording conversion](docs/yyos-recordings.md) and [VLC checks](docs/yyos-vlc.md) |
 | Back up the original firmware | [Firmware backup](docs/firmware-backup.md) |
 | Troubleshoot startup or playback | [Troubleshooting](docs/troubleshooting.md) |
 | Build, test or publish the project | [Building and testing](docs/building.md) |
