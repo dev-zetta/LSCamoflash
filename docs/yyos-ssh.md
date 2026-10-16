@@ -8,6 +8,16 @@ SSH grants a root shell to the owner of the authorized private client key. Comma
 
 ## Offline build
 
+For a complete credential-free HTTP/optional SSH package and guarded provisioning, use the [YYOS setup guide](yyos-setup.md). Public packages require the pinned static musl build below; the older private uClibc build remains part of the historical normal-boot evidence.
+
+```sh
+python3 tools/yyos/build-musl.py --source /private/musl-1.2.6.tar.gz --output /private/musl-build
+python3 tools/yyos/build-dropbear.py --source /private/dropbear-2026.94.tar.bz2 \
+  --musl-build /private/musl-build --output /private/dropbear-build
+```
+
+The musl source is pinned to SHA256 `d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a`. The builder verifies complete compiler-library/header inventories and ARM926 execution. The Dropbear build retains a narrow typed legacy-clock adapter and a fail-closed monotonic wrapper for this camera's broken time64 syscall stub, plus their source/object/patch provenance. Configure checks also link statically so required PTY support is detected. Neither builder changes the camera.
+
 Use a static ARMv5TE/ARMv5TEJ soft-float Dropbear2026.94 multicall executable containing the `dropbear` and `dropbearkey` applets, its matching portable build-provenance JSON and the hydrated upstream source archive. Build these with `python3 tools/yyos/build-dropbear.py --source /private/dropbear-2026.94.tar.bz2 --output /private/dropbear-build`; this retains matching source, configuration and relinkable objects. The output executable is `bin/dropbear`, with the copied source archive and `provenance.json` alongside it. The pinned source archive SHA256 is `e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81`. The build options compile out password/PAM authentication, forwarding and SFTP. Static linking avoids loading or replacing the stock uClibc1.0.31 libraries; it does not by itself establish camera acceptance.
 
 Generate the owner's Ed25519 client key and a separate native Dropbear Ed25519 host key on the host. Supply only the client's public half as one bare `ssh-ed25519 BASE64` line without options or a comment. The host key must use Dropbear's native 83-byte format, not an OpenSSH client private-key file. The builder checks format and bounds without printing key contents, and optional ARM926 QEMU checks load the host key with the matching keytool. Retain the private client key on the host; it is never packaged onto the card.
@@ -19,6 +29,7 @@ python3 tools/yyos/build-ssh-kit.py \
   --dropbear /private/dropbear-build/bin/dropbear \
   --dropbear-source /private/dropbear-build/dropbear-2026.94.tar.bz2 \
   --dropbear-provenance /private/dropbear-build/provenance.json \
+  --musl-build /private/musl-build \
   --client-public-key /private/owner_ed25519.pub \
   --host-key /private/dropbear_ed25519_host_key \
   --busybox SOURCE/backup-kit/card/busybox \
@@ -65,3 +76,9 @@ On **2026-10-16**, the owner confirmed connection after normal startup. The pinn
 A **32,768-byte** temporary SD file passed upload, same-directory atomic rename, download/hash comparison and cleanup. SSH readback verified the exact stock application and composed root hook, absent debug entry and empty normal marker. Stock PID **446** remained unchanged across system uptime **609.49→1,112.53 seconds**. The SSH master, PID **1317**, used **292 KiB RSS and one thread**; total available RAM was **16,252 then 16,576 KiB** out of 38,112 KiB. These samples do not measure incremental SSH cost.
 
 Authenticated HTTP, native RTSP/ONVIF and Tuya status also passed the [short enabled-normal-boot checks](yyos-native-media.md#native-enabled-normal-boot-short-acceptance). The owner confirmed the app remained Online while SSH/local streams ran. This does not establish every app function, detailed recording, stable repeated boots or long-term use. Public native configuration remains blocked pending separate write-path safeguards.
+
+## Musl replacement: temporary-port acceptance
+
+The final static musl build is 230,948 bytes with SHA256 `99facab1154cff679a7c5cd48e0239fd839b86e1779bee00f62e5b5342b6efa6`. Two builds with separate validated musl outputs produced that same executable. A temporary camera server on port 2223 accepted the pinned owner key/root shell and PTY, rejected wrong-key/password methods, used 252 KiB RSS / one thread and passed owned cleanup. The stock PID and original port 2222 SSH service remained unchanged. Actual camera clock progression, file metadata, fork/TLS/random and bounded poll/select probes passed with the adapter; the kernel itself was not changed. Earlier unadapted idle-timeout and incorrectly detected PTY failures are retained as diagnostic evidence. Normal startup with the replacement binary still requires separate acceptance.
+
+The public combined package includes complete musl MIT and GCC runtime-license/exception notices as well as the pinned Dropbear and musl source archives and matching recipes. Its SSH build is explicitly credential-free and disabled; provision it privately rather than copying keys from examples. These source/notice guarantees are distinct from physical boot and long-term behavior.

@@ -16,3 +16,16 @@ python3 -m venv /private/yyos-converter-env
 When using the repository instead of the downloaded kit, the corresponding paths are `tools/yyos/convert-recording.py` and `tools/yyos/recording-requirements.txt`. The JSON result reports frame counts, original timeline duration and source/output byte information; it contains no recording payload or credentials. This host tool opens no network connection and never runs on the camera.
 
 NUT preserves the captured H.264 and G.711 audio. Player support varies; FFmpeg can produce a separate H.264/AAC MP4 for broader playback compatibility. Validate the complete converted recording and audio before relying on that derivative, and retain the original timing/data. The converter does not merge multiple sessions or create missing audio. Downloaded recordings and `.info` may contain private footage, audio and identifiers; do not publish them as bug-report fixtures.
+
+```sh
+ffmpeg -n -i /private/recording.nut -c:v copy -c:a aac -ar 48000 \
+  -movflags +faststart /private/recording.mp4
+```
+
+This keeps the original H.264 video and converts microphone audio to AAC. Some clients can still struggle with this camera's high-resolution H.264 stream; MP4 packaging alone does not change its video profile. See the [VLC investigation](yyos-vlc.md) for the separate player issue.
+
+## Format and validation
+
+The verified camera sample has a 24-byte little-endian frame header: `uint32 type`, `uint32 payload_bytes`, `uint64 wall_clock_ms`, `uint64 monotonic_pts_us`. Observed types are 1 for an H.264 keyframe, 0 for an H.264 inter frame and 3 for G.711 mu-law audio. This implementation was derived independently from verified camera bytes; the [SmartLife recording extractor](https://github.com/slott/smartlife) is a related community format reference, with no code copied from it.
+
+One completed 705,164-byte camera segment retained all **150 video packets and 262 audio packets / 83,840 samples**. Independent packet comparison verified every payload hash and relative timestamp exactly; the NUT decoded with FFmpeg exit 0 and no error output. Twelve live HTTP checks also accepted authentication controls, directory lists, HEAD, byte-identical raw/metadata downloads and malformed-request rejection. These checks cover this narrow unencrypted format; user browser interaction, encrypted formats, joined sessions and long-term retention remain separate. See the [camera guide](camera-3225722.md) for deployment and resource measurements.

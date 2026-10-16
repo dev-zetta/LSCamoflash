@@ -1,5 +1,6 @@
 """Offline SSH-kit packaging controls: no camera, card or network access."""
 import base64
+import copy
 import hashlib
 import importlib.util
 import io
@@ -7,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import struct
 import tarfile
 import tempfile
 import time
@@ -98,6 +100,22 @@ class BuilderTests(unittest.TestCase):
             B.build(self.args)
         self.assertEqual(sentinel.read_bytes(), b'preserve')
 
+    def test_credential_free_kit_has_no_keys_or_enable_marker(self):
+        self.args.credential_free = True
+        self.args.client_public_key = self.args.host_key = None
+        output = B.build(self.args)
+        runtime = output / 'card/LSCamoflash-yyos-ssh'
+        self.assertFalse(json.loads((runtime / 'manifest.json').read_text())['credentials_provisioned'])
+        self.assertFalse(json.loads((output / 'manifest.json').read_text())['private_output'])
+        for name in (*B.PRIVATE_FILES, 'host-key.pub', 'host-key-fingerprint.txt'):
+            self.assertFalse((runtime / name).exists())
+            self.assertFalse((output / name).exists())
+
+    def test_credential_free_mode_refuses_site_inputs(self):
+        self.args.credential_free = True
+        with self.assertRaises(ValueError):
+            B.build(self.args)
+
     def test_symlink_output_and_input_refused(self):
         self.args.output.symlink_to(self.source, target_is_directory=True)
         with self.assertRaises(ValueError):
@@ -183,6 +201,52 @@ class BuilderTests(unittest.TestCase):
         result = subprocess.run(['/bin/sh', str(script), str(card)], capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(trace.read_text(), 'http\n')
+
+
+class ClockProofTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='yyos-clock-proof-test-')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.source = REPO / 'tools/yyos/yyos-clock-compat.c'
+        self.archive = self.root / 'source.tar.bz2'
+        original = b'void gettime_wrapper(struct timespec *now) {\n\tstruct timeval tv;\n}\n'
+        with tarfile.open(self.archive, 'w:bz2') as archive:
+            member = tarfile.TarInfo('dropbear-2026.94/src/dbutil.c'); member.size = len(original)
+            archive.addfile(member, io.BytesIO(original))
+        tree = self.root / 'upstream'; (tree / 'src').mkdir(parents=True)
+        (tree / 'src/dbutil.c').write_bytes(original)
+        builder = B.module('yyos_clock_fixture_builder', REPO / 'tools/yyos/build-dropbear.py')
+        obj = bytearray(52); obj[:7] = b'\x7fELF\x01\x01\x01'
+        struct.pack_into('<HHI', obj, 16, 1, 40, 1); struct.pack_into('<I', obj, 36, 0x05000200)
+        self.obj = self.root / 'compat.o'; self.obj.write_bytes(obj)
+        self.report = {'cflags': '-DLSCAMOFLASH_YYOS_CLOCK_COMPAT=1',
+                       'yyos_clock_patch': builder.patch_clock_fallback(tree),
+                       'yyos_clock_compat': {'source_sha256': B.CLOCK_SOURCE_SHA,
+                         'object_sha256': B.NOR.digest(self.obj), 'timeouts_disabled': False,
+                         'kernel_time_abi': 'ARM EABI signed time32 converted to libc time64',
+                         'clock_source': 'requested POSIX clock, including monotonic'}}
+
+    def test_audited_source_object_and_reproducible_monotonic_patch_accept(self):
+        self.assertEqual(B.clock_proof(self.report, self.archive, self.obj, self.source), self.report['yyos_clock_compat'])
+
+    def test_disabled_timeout_missing_macro_and_wrong_patch_refuse(self):
+        for kind in ('timeout', 'macro', 'patch'):
+            report = copy.deepcopy(self.report)
+            if kind == 'timeout': report['yyos_clock_compat']['timeouts_disabled'] = True
+            elif kind == 'macro': report['cflags'] = ''
+            else: report['yyos_clock_patch']['original_sha256'] = '0' * 64
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                B.clock_proof(report, self.archive, self.obj, self.source)
+
+    def test_coherently_rehashed_wrong_architecture_object_and_changed_source_refuse(self):
+        data = bytearray(self.obj.read_bytes()); struct.pack_into('<H', data, 18, 62); self.obj.write_bytes(data)
+        self.report['yyos_clock_compat']['object_sha256'] = B.NOR.digest(self.obj)
+        with self.assertRaises(ValueError):
+            B.clock_proof(self.report, self.archive, self.obj, self.source)
+        changed = self.root / 'compat.c'; changed.write_bytes(self.source.read_bytes() + b'\n/* changed */\n')
+        with self.assertRaises(ValueError):
+            B.clock_proof(self.report, self.archive, self.obj, changed)
 
 
 if __name__ == '__main__':

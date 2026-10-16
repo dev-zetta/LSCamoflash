@@ -35,6 +35,17 @@ jobs:
         run: make -C SOURCE fullhan-busybox-kit fullhan-onvif-kit fullhan-kit FULLHAN_ONVIF_KIT="${{ github.workspace }}/SOURCE/fullhan-onvif"
       - name: Build separate credential-free YYOS management with ARM926 smoke
         run: python3 tools/yyos/build-kit.py --output SOURCE/yyos-kit --busybox SOURCE/backup-kit/card/busybox --qemu /usr/bin/qemu-arm
+      - name: Build separate credential-free YYOS optional SSH and complete installer package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p SOURCE/yyos-inputs
+          curl --fail --location --retry 3 https://musl.libc.org/releases/musl-1.2.6.tar.gz -o SOURCE/yyos-inputs/musl-1.2.6.tar.gz
+          curl --fail --location --retry 3 https://matt.ucc.asn.au/dropbear/releases/dropbear-2026.94.tar.bz2 -o SOURCE/yyos-inputs/dropbear-2026.94.tar.bz2
+          python3 tools/yyos/build-musl.py --source SOURCE/yyos-inputs/musl-1.2.6.tar.gz --output SOURCE/yyos-musl --qemu /usr/bin/qemu-arm
+          python3 tools/yyos/build-dropbear.py --source SOURCE/yyos-inputs/dropbear-2026.94.tar.bz2 --musl-build SOURCE/yyos-musl --output SOURCE/yyos-dropbear --qemu /usr/bin/qemu-arm
+          python3 tools/yyos/build-ssh-kit.py --credential-free --dropbear SOURCE/yyos-dropbear/bin/dropbear --dropbear-source SOURCE/yyos-dropbear/dropbear-2026.94.tar.bz2 --dropbear-provenance SOURCE/yyos-dropbear/provenance.json --musl-build SOURCE/yyos-musl --busybox SOURCE/backup-kit/card/busybox --qemu /usr/bin/qemu-arm --output SOURCE/yyos-ssh-kit
+          python3 tools/yyos/package-kit.py --management-kit SOURCE/yyos-kit --ssh-kit SOURCE/yyos-ssh-kit --dropbear-build SOURCE/yyos-dropbear --musl-build SOURCE/yyos-musl --output SOURCE/yyos-release-kit
       - name: Run regressions with ARM926 BusyBox ash and backup tools
         env:
           CAMOFLASH_RUNTIME_SHELL: /usr/bin/qemu-arm -cpu arm926 ${{ github.workspace }}/SOURCE/build/mmcblk0p2/HACK/bin/busybox ash

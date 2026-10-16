@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Prepare a separate credential-free YYOS HTTP/optional SSH release package, with a guarded Linux plan/provision/install helper that preserves recognized authentication, logs and recordings and arms the normal marker last. Include host recording conversion tools, exact component sources/notices and release provenance checks; SSH defaults disabled. Host fixtures and fresh ARM926 package builds passed; the installer itself has not been used on a physical card.
+
 - Add read-only YYOS recording browsing and authenticated raw/metadata downloads, preserving the stock recording tree. Twelve live HTTP checks passed after a guarded remote update, with unchanged stock PID and 648 KiB HTTP RSS. Add a host converter for observed unencrypted v5 H.264/PCMU recordings; independent comparison retained every packet payload and timestamp, and software decoding passed. Browser playback, encrypted formats and recording deletion remain unavailable.
 - Add a pinned static musl SSH build with component notices and an exact-profile legacy-clock adapter for this camera's success-without-output time64 kernel stub. Camera clock/file/fork/wait probes and temporary-server authentication/PTY controls passed; the existing SSH service was preserved.
 

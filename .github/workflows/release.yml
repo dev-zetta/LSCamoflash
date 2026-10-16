@@ -67,12 +67,12 @@ jobs:
           expected = {
               f'LSCamoflash-{version}-uclibc.tar.gz', f'update-{version}-uclibc.tgz',
               f'LSCamoflash-{version}-backup-kit.tar.gz', f'LSCamoflash-{version}-source.tar.gz',
-              f'LSCamoflash-{version}-fullhan.tar.gz', 'LICENSE.MIT', 'COPYING.BusyBox',
+              f'LSCamoflash-{version}-fullhan.tar.gz', f'LSCamoflash-{version}-yyos.tar.gz', 'LICENSE.MIT', 'COPYING.BusyBox',
               'THIRD_PARTY_NOTICES.md', 'SHA256SUMS',
           }
           assets = list(Path('release').iterdir())
           if {path.name for path in assets} != expected or any(path.is_symlink() or not path.is_file() for path in assets):
-              raise SystemExit('Expected exactly nine public release assets')
+              raise SystemExit('Expected exactly ten public release assets')
           entries = {}
           for line in Path('release/SHA256SUMS').read_text().splitlines():
               match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9._-]+)', line)

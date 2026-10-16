@@ -15,7 +15,7 @@ SHA = 'a' * 40
 REPOSITORY = 'fixture-owner/LSCamoflash'
 ASSETS = {f'LSCamoflash-{VERSION}-uclibc.tar.gz', f'update-{VERSION}-uclibc.tgz',
           f'LSCamoflash-{VERSION}-backup-kit.tar.gz', f'LSCamoflash-{VERSION}-source.tar.gz',
-          f'LSCamoflash-{VERSION}-fullhan.tar.gz', 'LICENSE.MIT', 'COPYING.BusyBox',
+          f'LSCamoflash-{VERSION}-fullhan.tar.gz', f'LSCamoflash-{VERSION}-yyos.tar.gz', 'LICENSE.MIT', 'COPYING.BusyBox',
           'THIRD_PARTY_NOTICES.md', 'SHA256SUMS'}
 NOTES = 'Current major release.\n\n### Fullhan\n\nExperimental manual management and ONVIF.\n'
 FAKE_GH = '''#!/usr/bin/env python3
@@ -81,6 +81,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
                                                 for name in sorted(ASSETS - {'SHA256SUMS'})))
         if mutation == 'missing-fullhan':
             (assets / f'LSCamoflash-{VERSION}-fullhan.tar.gz').unlink()
+        elif mutation == 'missing-yyos':
+            (assets / f'LSCamoflash-{VERSION}-yyos.tar.gz').unlink()
         elif mutation == 'unexpected-asset':
             (assets / 'private.bin').write_bytes(b'must never publish\n')
         elif mutation == 'corrupt-checksum':
@@ -137,7 +139,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertFalse((work / 'create.json').exists())
 
     def test_complete_public_inventory_and_checksums_gate_all_release_writes(self):
-        for mutation in ('missing-fullhan', 'unexpected-asset', 'corrupt-checksum', 'incomplete-checksums'):
+        for mutation in ('missing-fullhan', 'missing-yyos', 'unexpected-asset', 'corrupt-checksum', 'incomplete-checksums'):
             with self.subTest(case=mutation):
                 work, exits, calls = self.run_case(mutation, mutation=mutation)
                 self.assertNotEqual(exits[-1], 0)
@@ -158,7 +160,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertFalse((work / 'published.json').exists())
                 self.assertFalse(any(call[:2] == ['release', 'edit'] for call in calls))
 
-    def test_valid_release_has_current_notes_nine_assets_exact_target_and_verified_draft(self):
+    def test_valid_release_has_current_notes_ten_assets_exact_target_and_verified_draft(self):
         work, exits, calls = self.run_case('valid')
         self.assertEqual(exits, [0, 0, 0])
         expected = ['release', 'create', 'v' + VERSION] + ['release/' + name for name in sorted(ASSETS)] + [

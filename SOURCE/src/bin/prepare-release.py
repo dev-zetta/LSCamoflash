@@ -2,6 +2,7 @@
 """Stage versioned public release assets; never build, publish, or access a card."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -26,6 +27,8 @@ FULLHAN_PAYLOAD_FILES = FULLHAN_SOURCE_FILES | {"bin/busybox", "bin/fullhan-reco
                                                 "bin/onvif_srvd", "LICENSE.MIT", "COPYING.BusyBox", "COPYING.ONVIF"}
 FULLHAN_FILES = FULLHAN_PAYLOAD_FILES | {"manifest.json", "SHA256SUMS"}
 FULLHAN_STOCK_SHA = "ef9545b2f4fce419d71dadf7723a9cb010500c994a87a325a8c325b51648c8b2"
+YYOS_DROPBEAR_SHA = "e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81"
+YYOS_MUSL_SHA = "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a"
 
 
 def digest(path):
@@ -278,6 +281,100 @@ def validate_fullhan(repo, inputs, busybox, copying):
     return kit
 
 
+def source_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    result = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(result)
+    return result
+
+
+def validate_yyos(repo, version, copying):
+    installer = source_module('yyos_release_installer', regular(repo / 'tools/yyos/install-kit.py'))
+    ssh = source_module('yyos_release_ssh_builder', regular(repo / 'tools/yyos/build-ssh-kit.py'))
+    kit = repo / 'SOURCE/yyos-release-kit'
+    manifest = installer.validate_kit(kit, public=True)
+    libc = manifest.get('libc', {})
+    if (manifest.get('version') != version or manifest.get('arm926_smoke') is not True
+            or manifest.get('ssh_optional_default_disabled') is not True
+            or libc.get('name') != 'musl' or libc.get('version') != '1.2.6'):
+        raise ValueError('YYOS release requires the matching credential-free ARM926 HTTP/optional musl SSH package')
+    projects = manifest.get('project_sources')
+    required = {'tools/yyos/package-kit.py', 'tools/yyos/install-kit.py', 'tools/yyos/build-kit.py',
+                'tools/yyos/build-ssh-kit.py', 'tools/yyos/build-dropbear.py', 'tools/yyos/build-musl.py',
+                'tools/yyos/dropbear-localoptions.h', 'tools/yyos/boot.sh', 'tools/yyos/yyos-clock-compat.c',
+                'tools/yyos/convert-recording.py', 'tools/yyos/recording-requirements.txt',
+                'docs/yyos-setup.md', 'docs/yyos-recordings.md'}
+    for directory in ('SOURCE/src/yyos', 'SOURCE/src/yyos-ssh', 'SOURCE/src/contrib/yyos-recordings'):
+        root = repo / directory
+        if root.exists():
+            required |= {path.relative_to(repo).as_posix() for path in root.rglob('*') if path.is_file()}
+    if not isinstance(projects, dict) or set(projects) != required:
+        raise ValueError('YYOS project source inventory differs from current public sources')
+    for name, checksum in projects.items():
+        installer.safe_name(name)
+        if digest(regular(repo / name)) != checksum:
+            raise ValueError('YYOS source differs from packaged provenance: ' + name)
+    card = kit / 'card'
+    source_names = {'dropbear-2026.94.tar.bz2', 'musl-1.2.6.tar.gz', 'COPYING.musl',
+                    'GCC-COPYING3', 'GCC-COPYING.RUNTIME', 'musl-provenance.json',
+                    'dropbear-provenance.json', 'build-musl.py', 'build-dropbear.py', 'dropbear-localoptions.h',
+                    'yyos-clock-compat.c', 'yyos-clock-compat.o'}
+    exact = {'README.md', 'SETUP.md', 'RECORDINGS.md', 'install-kit.py', 'tools/convert-recording.py',
+             'tools/recording-requirements.txt'} | {'sources/' + name for name in source_names}
+    exact |= {'card/' + name for name in installer.tree(card)}
+    if set(manifest['files']) != exact:
+        raise ValueError('YYOS package contains unknown or missing host files, including private/untracked data')
+    for packaged, original in {'install-kit.py': 'tools/yyos/install-kit.py', 'SETUP.md': 'docs/yyos-setup.md',
+                               'sources/build-musl.py': 'tools/yyos/build-musl.py', 'sources/build-dropbear.py': 'tools/yyos/build-dropbear.py',
+                               'sources/dropbear-localoptions.h': 'tools/yyos/dropbear-localoptions.h',
+                               'sources/yyos-clock-compat.c': 'tools/yyos/yyos-clock-compat.c',
+                               'RECORDINGS.md': 'docs/yyos-recordings.md',
+                               'tools/convert-recording.py': 'tools/yyos/convert-recording.py',
+                               'tools/recording-requirements.txt': 'tools/yyos/recording-requirements.txt'}.items():
+        if digest(kit / packaged) != digest(repo / original):
+            raise ValueError('YYOS packaged installer/build source differs from current source')
+    if (card / 'yyos-http-boot.sh').read_bytes() != regular(repo / 'tools/yyos/boot.sh').read_bytes() \
+            or (card / 'dump.sh').read_bytes() != ssh.boot_wrapper(digest(card / 'yyos-http-boot.sh')):
+        raise ValueError('YYOS combined boot wrapper differs from current source')
+    for folder, source in ((installer.HTTP, 'yyos'), (installer.SSH, 'yyos-ssh')):
+        runtime = card / folder
+        files = json.loads((runtime / 'manifest.json').read_text())['files']
+        for name, checksum in files.items():
+            original = repo / 'SOURCE/src' / source / name
+            if original.exists() and digest(regular(original)) != checksum:
+                raise ValueError('YYOS runtime differs from current source: ' + name)
+        if (runtime / 'LICENSE.MIT').read_bytes() != regular(repo / 'LICENSE').read_bytes() \
+                or (runtime / 'COPYING.BusyBox').read_bytes() != copying:
+            raise ValueError('YYOS project or BusyBox license differs from current source')
+    binaries = {'telnetd', 'busybox'} | {path.relative_to(card).as_posix()
+                for folder in (installer.HTTP, installer.SSH) for path in (card / folder / 'bin').iterdir() if path.is_file()}
+    reports = manifest.get('binaries', {})
+    if set(reports) != binaries:
+        raise ValueError('YYOS static binary inventory differs from public payload')
+    for name in binaries:
+        binary_provenance(card / name, reports[name])
+    sources = kit / 'sources'
+    if digest(regular(sources / 'dropbear-2026.94.tar.bz2')) != YYOS_DROPBEAR_SHA \
+            or digest(regular(sources / 'musl-1.2.6.tar.gz')) != YYOS_MUSL_SHA:
+        raise ValueError('YYOS SSH source archives differ from pinned upstream identities')
+    source = json.loads(regular(sources / 'dropbear-provenance.json').read_text())
+    server = json.loads((card / installer.SSH / 'manifest.json').read_text())
+    if source != server.get('dropbear_build') or source.get('libc') != libc \
+            or source.get('binary_sha256') != digest(card / installer.SSH / 'bin/dropbear'):
+        raise ValueError('YYOS Dropbear binary/source provenance mismatch')
+    ssh.clock_proof(source, sources / 'dropbear-2026.94.tar.bz2', sources / 'yyos-clock-compat.o',
+                    sources / 'yyos-clock-compat.c')
+    expected_notices = {'COPYING.musl': libc.get('license_sha256'), **libc.get('gcc_runtime_notices', {})}
+    if set(expected_notices) != {'COPYING.musl', 'GCC-COPYING3', 'GCC-COPYING.RUNTIME'} \
+            or libc.get('source_archive_sha256') != YYOS_MUSL_SHA \
+            or libc.get('provenance_sha256') != digest(regular(sources / 'musl-provenance.json')):
+        raise ValueError('YYOS musl source/runtime provenance is incomplete')
+    for name, checksum in expected_notices.items():
+        if digest(regular(sources / name)) != checksum or (sources / name).read_bytes() not in (card / installer.SSH / 'COPYING.Dropbear').read_bytes():
+            raise ValueError('YYOS static runtime notice is missing or changed')
+    return kit
+
+
 def output_empty(output):
     if any(path.is_symlink() for path in (output, *output.parents)):
         raise ValueError("Release output must not use symlinks")
@@ -303,7 +400,7 @@ def notices(repo, version, source_name, inputs):
     summary = regular(repo / "SOURCE/3RD_PARTY_LICENSES.md").read_text()
     return f"""# LSCamoflash {version}: third-party notices
 
-The project-authored code is covered by LICENSE.MIT. The runtime, backup kit and separate Fullhan management kit also contain independently licensed third-party software; this distribution as a whole is not licensed solely under MIT. COPYING.BusyBox contains the GPL version 2 text supplied with the exact BusyBox source input. The Fullhan archive additionally includes COPYING.ONVIF for its isolated static ONVIF server, gSOAP authentication code with its OpenSSL linking exception, OpenSSL, zlib and toolchain runtime components; retain these component notices. It contains no HTTP/ONVIF credentials or site UUID; provision those privately before manual startup.
+The project-authored code is covered by LICENSE.MIT. The runtime, backup kit and separate Fullhan/YYOS management kits also contain independently licensed third-party software; this distribution as a whole is not licensed solely under MIT. COPYING.BusyBox contains the GPL version 2 text supplied with the exact BusyBox source input. The Fullhan archive additionally includes COPYING.ONVIF for its isolated static ONVIF server, gSOAP authentication code with its OpenSSL linking exception, OpenSSL, zlib and toolchain runtime components; retain these component notices. The separate YYOS archive includes disabled optional SSH, pinned Dropbear and musl source archives/build provenance, their notices and the GCC runtime exception notice. Neither management archive contains site HTTP/ONVIF/SSH credentials, SSH enable markers or site UUIDs; provision authentication privately before startup.
 
 The accompanying `{source_name}` contains the Git-tracked public repository files, including build recipes, patches, configurations and project notices, plus every hydrated input explicitly listed by SOURCE/Makefile URLS. Untracked working directories, private research and undeclared download files are excluded. Source archives retain their upstream license texts. FFmpeg is built with --enable-gpl and --enable-version3, giving this build GPL version 3 or later licensing.
 
@@ -327,6 +424,7 @@ def prepare(repo, output):
     source_name = f"LSCamoflash-{version}-source.tar.gz"
     kit_name = f"LSCamoflash-{version}-backup-kit.tar.gz"
     fullhan_name = f"LSCamoflash-{version}-fullhan.tar.gz"
+    yyos_name = f"LSCamoflash-{version}-yyos.tar.gz"
     full, update = repo / "SOURCE" / full_name, repo / "SOURCE" / update_name
     full_members, update_members = archive_inventory(full), archive_inventory(update)
     full_version = full_members.get(VERSION_MEMBER)
@@ -343,6 +441,7 @@ def prepare(repo, output):
         raise ValueError("BusyBox source archive is not a declared URLS input")
     copying = busybox_license(repo, busybox)
     fullhan = validate_fullhan(repo, inputs, busybox, copying)
+    yyos = validate_yyos(repo, version, copying)
     project_license = regular(repo / "SOURCE/LICENSE.MIT")
     notice_text = notices(repo, version, source_name, inputs)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -370,6 +469,10 @@ def prepare(repo, output):
             # Runtime paths intentionally use this fixed installation folder.
             for relative in sorted(FULLHAN_FILES):
                 add_file(archive, fullhan / relative, "LSCamoflash-fullhan/" + relative)
+        with tarfile.open(stage / yyos_name, "w:gz", dereference=False) as archive:
+            for path in sorted(yyos.rglob('*')):
+                if path.is_file():
+                    add_file(archive, path, 'LSCamoflash-yyos-kit/' + path.relative_to(yyos).as_posix())
         assets = sorted(path.name for path in stage.iterdir())
         (stage / "SHA256SUMS").write_text("".join(f"{digest(stage / name)}  {name}\n" for name in assets))
         output_empty(output)

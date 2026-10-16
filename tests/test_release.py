@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import struct
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'SOURCE/src/bin/prepare-release.py'
@@ -139,6 +141,7 @@ URLS := \\
                                  'helpers': {name: report(name) for name in ('fullhan-recordings', 'fullhan-discovery')},
                                  'files': {name: RELEASE.digest(self.fullhan / name) for name in RELEASE.FULLHAN_PAYLOAD_FILES}}
         self.fullhan_sums()
+        self.setup_yyos()
 
     def git(self, *arguments):
         return subprocess.run(['git', '-C', str(self.root), *arguments], check=True,
@@ -157,6 +160,122 @@ URLS := \\
         (self.fullhan / 'manifest.json').write_text(json.dumps(self.fullhan_manifest))
         sums(self.fullhan, RELEASE.FULLHAN_FILES - {'SHA256SUMS'})
 
+    def setup_yyos(self):
+        def module(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            result = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(result)
+            return result
+        installer = module('yyos_release_fixture_installer', ROOT / 'tools/yyos/install-kit.py')
+        ssh = module('yyos_release_fixture_ssh', ROOT / 'tools/yyos/build-ssh-kit.py')
+        projects = {'tools/yyos/package-kit.py', 'tools/yyos/install-kit.py', 'tools/yyos/build-kit.py',
+                    'tools/yyos/build-ssh-kit.py', 'tools/yyos/build-dropbear.py', 'tools/yyos/build-musl.py',
+                    'tools/yyos/dropbear-localoptions.h', 'tools/yyos/boot.sh', 'tools/yyos/yyos-clock-compat.c',
+                    'tools/yyos/convert-recording.py', 'tools/yyos/recording-requirements.txt',
+                    'docs/yyos-setup.md', 'docs/yyos-recordings.md'}
+        for name in projects | {'tools/firmware-backup/build-yyos-kit.py', 'tools/firmware-backup/build-kit.py'}:
+            self.write(name, (ROOT / name).read_bytes())
+        self.yyos = self.source / 'yyos-release-kit'
+        card = self.yyos / 'card'
+        for folder, base, fmt, source in ((installer.HTTP, installer.HTTP_BASE, 'lscamoflash-yyos-management-v1', 'yyos'),
+                                         (installer.SSH, installer.SSH_BASE, 'lscamoflash-yyos-ssh-kit-v1', 'yyos-ssh')):
+            runtime = card / folder
+            for name in base:
+                path = runtime / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if name == 'LICENSE.MIT':
+                    data = (self.root / 'LICENSE').read_bytes()
+                elif name == 'COPYING.BusyBox':
+                    data = b'BusyBox GPL version 2 fixture\n'
+                else:
+                    data = ('public YYOS fixture ' + name + '\n').encode()
+                path.write_bytes(data)
+                if not name.startswith('bin/') and name not in {'LICENSE.MIT', 'COPYING.BusyBox', 'COPYING.Dropbear'}:
+                    relative = 'SOURCE/src/' + source + '/' + name
+                    self.write(relative, data)
+                    projects.add(relative)
+            manifest = {'format': fmt, 'stock_sha256': installer.STOCK_SHA, 'credentials_provisioned': False,
+                        'arm926_smoke': True, 'files': {name: RELEASE.digest(runtime / name) for name in base}}
+            (runtime / 'manifest.json').write_text(json.dumps(manifest))
+        for name in installer.ROOT_FILES - {'SHA256SUMS'}:
+            path = card / name
+            if name == 'yy_telnet_start':
+                data = b''
+            elif name == 'yyos-http-boot.sh':
+                data = (self.root / 'tools/yyos/boot.sh').read_bytes()
+            elif name == 'dump.sh':
+                data = ssh.boot_wrapper(RELEASE.digest(self.root / 'tools/yyos/boot.sh'))
+            else:
+                data = ('public YYOS binary ' + name).encode()
+            path.write_bytes(data)
+        sources = self.yyos / 'sources'
+        sources.mkdir()
+        original = b'void gettime_wrapper(struct timespec *now) {\n\tstruct timeval tv;\n}\n'
+        tar_bytes(sources / 'dropbear-2026.94.tar.bz2', {'dropbear-2026.94/src/dbutil.c': original}, 'w:bz2')
+        (sources / 'musl-1.2.6.tar.gz').write_bytes(b'tiny public musl source fixture')
+        for name in ('COPYING.musl', 'GCC-COPYING3', 'GCC-COPYING.RUNTIME'):
+            (sources / name).write_bytes(('public license fixture ' + name).encode())
+        (sources / 'musl-provenance.json').write_text('{"name":"musl","version":"1.2.6"}')
+        libc = {'name': 'musl', 'version': '1.2.6', 'source_archive_sha256': RELEASE.digest(sources / 'musl-1.2.6.tar.gz'),
+                'license_sha256': RELEASE.digest(sources / 'COPYING.musl'),
+                'provenance_sha256': RELEASE.digest(sources / 'musl-provenance.json'),
+                'gcc_runtime_notices': {name: RELEASE.digest(sources / name) for name in ('GCC-COPYING3', 'GCC-COPYING.RUNTIME')}}
+        for name, value in (('YYOS_DROPBEAR_SHA', RELEASE.digest(sources / 'dropbear-2026.94.tar.bz2')),
+                            ('YYOS_MUSL_SHA', RELEASE.digest(sources / 'musl-1.2.6.tar.gz'))):
+            guard = patch.object(RELEASE, name, value)
+            guard.start(); self.addCleanup(guard.stop)
+        clock = self.root / 'clock-source'
+        (clock / 'src').mkdir(parents=True)
+        (clock / 'src/dbutil.c').write_bytes(original)
+        builder = module('yyos_release_fixture_clock', ROOT / 'tools/yyos/build-dropbear.py')
+        obj = bytearray(52); obj[:7] = b'\x7fELF\x01\x01\x01'
+        struct.pack_into('<HHI', obj, 16, 1, 40, 1); struct.pack_into('<I', obj, 36, 0x05000200)
+        (sources / 'yyos-clock-compat.o').write_bytes(obj)
+        (sources / 'yyos-clock-compat.c').write_bytes((ROOT / 'tools/yyos/yyos-clock-compat.c').read_bytes())
+        proof = {'libc': libc, 'binary_sha256': RELEASE.digest(card / installer.SSH / 'bin/dropbear'),
+                 'cflags': '-DLSCAMOFLASH_YYOS_CLOCK_COMPAT=1', 'yyos_clock_patch': builder.patch_clock_fallback(clock),
+                 'yyos_clock_compat': {'source_sha256': ssh.CLOCK_SOURCE_SHA, 'object_sha256': RELEASE.digest(sources / 'yyos-clock-compat.o'),
+                   'kernel_time_abi': 'ARM EABI signed time32 converted to libc time64',
+                   'clock_source': 'requested POSIX clock, including monotonic', 'timeouts_disabled': False}}
+        (sources / 'dropbear-provenance.json').write_text(json.dumps(proof))
+        secure = card / installer.SSH
+        (secure / 'COPYING.Dropbear').write_bytes(b'\n'.join((sources / name).read_bytes() for name in
+                                                  ('COPYING.musl', 'GCC-COPYING3', 'GCC-COPYING.RUNTIME')))
+        for folder in (installer.HTTP, installer.SSH):
+            runtime = card / folder
+            manifest = json.loads((runtime / 'manifest.json').read_text())
+            manifest['files'] = {name: RELEASE.digest(runtime / name) for name in manifest['files']}
+            if folder == installer.SSH:
+                manifest['dropbear_build'] = proof
+            (runtime / 'manifest.json').write_text(json.dumps(manifest))
+            sums(runtime, set(manifest['files']) | {'manifest.json'})
+        public = {p.relative_to(card).as_posix() for p in card.rglob('*') if p.is_file()}
+        sums(card, public)
+        (self.yyos / 'install-kit.py').write_bytes((ROOT / 'tools/yyos/install-kit.py').read_bytes())
+        (self.yyos / 'SETUP.md').write_bytes((ROOT / 'docs/yyos-setup.md').read_bytes())
+        (self.yyos / 'RECORDINGS.md').write_bytes((ROOT / 'docs/yyos-recordings.md').read_bytes())
+        (self.yyos / 'tools').mkdir()
+        for name in ('convert-recording.py', 'recording-requirements.txt'):
+            (self.yyos / 'tools' / name).write_bytes((ROOT / 'tools/yyos' / name).read_bytes())
+        (self.yyos / 'README.md').write_bytes(b'Public YYOS package fixture\n')
+        for name in ('build-musl.py', 'build-dropbear.py', 'dropbear-localoptions.h'):
+            (sources / name).write_bytes((ROOT / 'tools/yyos' / name).read_bytes())
+        public = {p.relative_to(self.yyos).as_posix() for p in self.yyos.rglob('*') if p.is_file()}
+        binaries = {'telnetd', 'busybox'} | {p.relative_to(card).as_posix() for folder in (installer.HTTP, installer.SSH)
+                                           for p in (card / folder / 'bin').iterdir()}
+        self.yyos_manifest = {'format': installer.FORMAT, 'stock_sha256': installer.STOCK_SHA, 'credential_free': True,
+                              'version': VERSION, 'arm926_smoke': True, 'ssh_optional_default_disabled': True, 'libc': libc,
+                              'project_sources': {name: RELEASE.digest(self.root / name) for name in projects},
+                              'binaries': {name: {'static': True, 'cpu_arch': 'v5TEJ', 'bytes': (card / name).stat().st_size,
+                                                  'sha256': RELEASE.digest(card / name)} for name in binaries},
+                              'files': {name: RELEASE.digest(self.yyos / name) for name in public}}
+        self.yyos_sums()
+        self.git('add', 'tools', 'docs', 'SOURCE/src/yyos', 'SOURCE/src/yyos-ssh')
+
+    def yyos_sums(self):
+        (self.yyos / 'manifest.json').write_text(json.dumps(self.yyos_manifest))
+        sums(self.yyos, set(self.yyos_manifest['files']) | {'manifest.json'})
+
     def test_assets_are_byte_exact_and_every_asset_checksum_is_correct(self):
         self.output.mkdir()  # A dedicated empty directory is accepted.
         self.stage()
@@ -168,9 +287,46 @@ URLS := \\
             entries[name] = checksum
             self.assertEqual(hashlib.sha256((self.output / name).read_bytes()).hexdigest(), checksum)
         self.assertEqual(set(entries), {p.name for p in self.output.iterdir()} - {'SHA256SUMS'})
-        self.assertEqual(len(entries), 8)
+        self.assertEqual(len(entries), 9)
         self.assertEqual((self.output / 'COPYING.BusyBox').read_bytes(), b'BusyBox GPL version 2 fixture\n')
         self.assertIn('not complete component-source archives', (self.output / 'THIRD_PARTY_NOTICES.md').read_text())
+
+    def test_yyos_archive_is_separate_credential_free_with_optional_ssh_and_sources(self):
+        self.stage()
+        with tarfile.open(self.output / f'LSCamoflash-{VERSION}-yyos.tar.gz') as archive:
+            members = {member.name.removeprefix('LSCamoflash-yyos-kit/'): member for member in archive}
+            expected = {path.relative_to(self.yyos).as_posix() for path in self.yyos.rglob('*') if path.is_file()}
+            self.assertEqual(set(members), expected)
+            self.assertIn('card/LSCamoflash-yyos-ssh/bin/dropbear', members)
+            self.assertIn('sources/musl-1.2.6.tar.gz', members)
+            self.assertIn('install-kit.py', members)
+            for name in members:
+                self.assertNotIn('httpd.conf', name)
+                self.assertNotIn('ssh.enabled', name)
+                self.assertNotIn('host_key', name)
+                self.assertNotIn('.local', name)
+
+    def test_yyos_credentials_cannot_be_laundered_into_rehashed_public_inventory(self):
+        path = self.yyos / 'card/LSCamoflash-yyos/httpd.conf'
+        path.write_bytes(b'private account material\n')
+        self.yyos_manifest['files'][path.relative_to(self.yyos).as_posix()] = RELEASE.digest(path)
+        self.yyos_sums()
+        with self.assertRaises(ValueError):
+            self.stage()
+        self.assertFalse(self.output.exists())
+
+    def test_yyos_source_mismatch_or_coherently_added_private_host_file_is_rejected(self):
+        path = self.yyos / 'private-owner-key'
+        path.write_bytes(b'private untracked key fixture')
+        self.yyos_manifest['files']['private-owner-key'] = RELEASE.digest(path)
+        self.yyos_sums()
+        with self.assertRaises(ValueError):
+            self.stage()
+        path.unlink(); del self.yyos_manifest['files']['private-owner-key']; self.yyos_sums()
+        self.write('SOURCE/src/yyos/start.sh', b'new public source\n')
+        with self.assertRaises(ValueError):
+            self.stage()
+        self.assertFalse(self.output.exists())
 
     def test_source_bundle_contains_tracked_public_files_and_only_declared_hydrated_downloads(self):
         self.stage()
@@ -376,13 +532,17 @@ URLS := \\
         self.assertFalse(self.output.exists())
 
     def test_cli_resolves_repo_from_script_and_only_stages_fixture(self):
-        copied = self.write('SOURCE/src/bin/prepare-release.py', SCRIPT.read_bytes())
+        # Replace only pinned archive identities in this fixture copy so the
+        # subprocess can use tiny synthetic archives without a runtime bypass.
+        script = SCRIPT.read_bytes().replace(b'e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81', RELEASE.YYOS_DROPBEAR_SHA.encode())
+        script = script.replace(b'd585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a', RELEASE.YYOS_MUSL_SHA.encode())
+        copied = self.write('SOURCE/src/bin/prepare-release.py', script)
         self.git('add', 'SOURCE/src/bin/prepare-release.py')
         result = subprocess.run(['python3', str(copied), '--output', str(self.output)],
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('Prepared public release assets:', result.stdout)
-        self.assertEqual(len(list(self.output.iterdir())), 9)
+        self.assertEqual(len(list(self.output.iterdir())), 10)
 
 
 if __name__ == '__main__':

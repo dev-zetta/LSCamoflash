@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import tarfile
 import tempfile
@@ -23,6 +24,7 @@ PRIVATE_FILES = ('authorized_keys', 'dropbear_ed25519_host_key', 'ssh.enabled')
 FORMAT = 'lscamoflash-yyos-ssh-kit-v1'
 VERSION = '2026.94'
 SOURCE_SHA = 'e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81'
+CLOCK_SOURCE_SHA = 'f3f3c87472abbaf78756f8245416b980b63e2e733b2c95072c5a71a2a5514655'
 STOCK_SHA = 'd76d632f41453f53d9d117582fc47073934f5e6ec9a9b7a0ebb1dd3824f6cba7'
 APPLETS = {'sh', 'id', 'sha256sum', 'awk', 'stat', 'find', 'readlink', 'netstat',
            'ip', 'tr', 'mkdir', 'rmdir', 'rm', 'kill', 'sleep', 'cat', 'pidof',
@@ -117,8 +119,8 @@ def provenance(path, binary):
     # output, environment or credential-related fields into the public manifest.
     keep = ('version', 'binary_sha256', 'source_archive_sha256', 'source_url',
             'configure_flags', 'make_args', 'cflags', 'ldflags', 'localoptions',
-            'localoptions_sha256', 'compiler_version', 'compiler_sha256', 'static_libc_version', 'toolchain',
-            'toolchain_source', 'patches', 'build_script_sha256')
+            'localoptions_sha256', 'compiler_version', 'compiler_sha256', 'static_libc_version', 'libc', 'toolchain',
+            'toolchain_source', 'patches', 'build_script_sha256', 'yyos_clock_compat', 'yyos_clock_patch')
     result = {key: data[key] for key in keep if key in data}
     if not result.get('localoptions') or not result.get('configure_flags'):
         raise ValueError('Dropbear provenance must include localoptions and configure_flags')
@@ -140,6 +142,39 @@ def provenance(path, binary):
     if not {'--enable-static', '--disable-syslog', '--disable-shadow'} <= set(result['configure_flags']):
         raise ValueError('Dropbear configure flags must preserve the static, stderr-only build contract')
     return result
+
+
+def clock_proof(report, archive_path, object_path, source_path=None):
+    """Check the audited legacy-clock object and reproduce the bounded text patch."""
+    source_path = source_path or REPO / 'tools/yyos/yyos-clock-compat.c'
+    source = regular(source_path, 64 * 1024)
+    obj = regular(object_path, 128 * 1024)
+    proof = report.get('yyos_clock_compat', {})
+    data = obj.read_bytes()
+    if (not isinstance(proof, dict) or proof.get('source_sha256') != CLOCK_SOURCE_SHA
+            or NOR.digest(source) != CLOCK_SOURCE_SHA or proof.get('object_sha256') != NOR.digest(obj)
+            or proof.get('timeouts_disabled') is not False
+            or proof.get('kernel_time_abi') != 'ARM EABI signed time32 converted to libc time64'
+            or proof.get('clock_source') != 'requested POSIX clock, including monotonic'
+            or '-DLSCAMOFLASH_YYOS_CLOCK_COMPAT=1' not in report.get('cflags', '').split()
+            or len(data) < 52 or data[:7] != b'\x7fELF\x01\x01\x01'
+            or struct.unpack_from('<HH', data, 16) != (1, 40)
+            or struct.unpack_from('<I', data, 36)[0] & 0xFF000400 != 0x05000000):
+        raise ValueError('Public musl SSH requires the audited ARM legacy-clock object and enabled fail-closed policy')
+    with tarfile.open(regular(archive_path, 32 * 1024 * 1024), 'r:bz2') as archive:
+        member = archive.getmember('dropbear-2026.94/src/dbutil.c')
+        if not member.isfile() or not 0 < member.size <= 128 * 1024:
+            raise ValueError('Invalid upstream clock-wrapper source')
+        original = archive.extractfile(member).read()
+    builder = module('yyos_clock_patch_validator', REPO / 'tools/yyos/build-dropbear.py')
+    with tempfile.TemporaryDirectory(prefix='yyos-clock-proof-') as temporary:
+        root = Path(temporary)
+        (root / 'src').mkdir()
+        (root / 'src/dbutil.c').write_bytes(original)
+        expected = builder.patch_clock_fallback(root)
+    if report.get('yyos_clock_patch') != expected:
+        raise ValueError('Dropbear monotonic-clock patch provenance does not match the pinned upstream text')
+    return proof
 
 
 def boot_wrapper(http_hash):
@@ -182,9 +217,36 @@ def build(args):
     BACKUP.validate_output(output)
     binary = regular(args.dropbear, 8 * 1024 * 1024)
     busybox = regular(args.busybox, 8 * 1024 * 1024)
-    keys = (public_key(args.client_public_key), host_key(args.host_key))
+    credential_free = getattr(args, 'credential_free', False)
+    if credential_free:
+        if args.client_public_key is not None or args.host_key is not None:
+            raise ValueError('A credential-free build must not receive site keys')
+        keys = None
+    else:
+        if args.client_public_key is None or args.host_key is None:
+            raise ValueError('Provide both owner public key and host key, or explicitly use --credential-free')
+        keys = (public_key(args.client_public_key), host_key(args.host_key))
     copying_dropbear = source_license(args.dropbear_source)
     build_info = provenance(args.dropbear_provenance, binary)
+    libc = build_info.get('libc')
+    if libc is not None:
+        if not getattr(args, 'musl_build', None) or libc.get('name') != 'musl' or libc.get('version') != '1.2.6':
+            raise ValueError('The musl-linked binary requires its matching --musl-build directory')
+        musl = args.musl_build.absolute()
+        for name, expected in {'COPYING.musl': libc.get('license_sha256'),
+                               **libc.get('gcc_runtime_notices', {})}.items():
+            if name not in {'COPYING.musl', 'GCC-COPYING3', 'GCC-COPYING.RUNTIME'}:
+                raise ValueError('Unexpected static runtime license name')
+            path = regular(musl / name, 256 * 1024)
+            if NOR.digest(path) != expected:
+                raise ValueError('Static runtime license differs from Dropbear provenance')
+            copying_dropbear += ('\n===== Static runtime ' + name + ' =====\n').encode() + path.read_bytes()
+        if set(libc.get('gcc_runtime_notices', {})) != {'GCC-COPYING3', 'GCC-COPYING.RUNTIME'}:
+            raise ValueError('Musl builds must retain both GCC runtime notices')
+        for name, key in (('musl-1.2.6.tar.gz', 'source_archive_sha256'), ('provenance.json', 'provenance_sha256')):
+            if NOR.digest(regular(musl / name, 32 * 1024 * 1024)) != libc.get(key):
+                raise ValueError('Musl source/provenance identity mismatch')
+        clock_proof(build_info, args.dropbear_source, args.dropbear_provenance.parent / 'yyos-clock-compat.o')
     readelf = NOR.executable(args.readelf)
     reports = {name: NOR.validate_arm_elf(path, readelf) for name, path in
                (('dropbear', binary), ('busybox', busybox))}
@@ -210,16 +272,18 @@ def build(args):
         shutil.copyfile(regular(REPO / 'LICENSE', 128 * 1024), runtime / 'LICENSE.MIT')
         (runtime / 'COPYING.BusyBox').write_bytes(copying_busybox)
         (runtime / 'COPYING.Dropbear').write_bytes(copying_dropbear)
-        for name, data in zip(PRIVATE_FILES, (*keys, b'enabled\n')):
-            (runtime / name).write_bytes(data)
-            (runtime / name).chmod(0o600)
+        if keys:
+            for name, data in zip(PRIVATE_FILES, (*keys, b'enabled\n')):
+                (runtime / name).write_bytes(data)
+                (runtime / name).chmod(0o600)
         (stage / 'boot').mkdir()
         shutil.copyfile(http, stage / 'boot/normal-http-boot.sh')
         (stage / 'boot/boot.sh').write_bytes(wrapper)
-        host_public = b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + keys[1][51:]
-        (stage / 'host-key.pub').write_bytes(b'ssh-ed25519 ' + base64.b64encode(host_public) + b'\n')
-        (stage / 'host-key-fingerprint.txt').write_text(
-            'SHA256:' + base64.b64encode(hashlib.sha256(host_public).digest()).decode().rstrip('=') + '\n')
+        if keys:
+            host_public = b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + keys[1][51:]
+            (stage / 'host-key.pub').write_bytes(b'ssh-ed25519 ' + base64.b64encode(host_public) + b'\n')
+            (stage / 'host-key-fingerprint.txt').write_text(
+                'SHA256:' + base64.b64encode(hashlib.sha256(host_public).digest()).decode().rstrip('=') + '\n')
         if qemu:
             applets = subprocess.run([str(qemu), '-cpu', 'arm926', str(runtime / 'bin/busybox'), '--list'],
                                      capture_output=True, text=True, check=True, timeout=15).stdout.splitlines()
@@ -232,18 +296,20 @@ def build(args):
                                    capture_output=True, timeout=5)
             if b'Dropbear server v2026.94' not in probe.stderr:
                 raise ValueError('Dropbear ARM926 server smoke failed')
-            keytool = Path(temporary) / 'dropbearkey'
-            shutil.copyfile(binary, keytool)
-            keytool.chmod(0o700)
-            probe = subprocess.run([str(qemu), '-cpu', 'arm926', str(keytool), '-y', '-f', str(runtime / PRIVATE_FILES[1])],
-                                   capture_output=True, check=True, timeout=5)
-            expected = base64.b64encode(b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + keys[1][51:])
-            if [b'ssh-ed25519', expected] not in [line.split()[:2] for line in probe.stdout.splitlines()]:
-                raise ValueError('Dropbear keytool did not load the supplied Ed25519 host key')
+            if keys:
+                keytool = Path(temporary) / 'dropbearkey'
+                shutil.copyfile(binary, keytool)
+                keytool.chmod(0o700)
+                probe = subprocess.run([str(qemu), '-cpu', 'arm926', str(keytool), '-y', '-f', str(runtime / PRIVATE_FILES[1])],
+                                       capture_output=True, check=True, timeout=5)
+                expected = base64.b64encode(b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + keys[1][51:])
+                if [b'ssh-ed25519', expected] not in [line.split()[:2] for line in probe.stdout.splitlines()]:
+                    raise ValueError('Dropbear keytool did not load the supplied Ed25519 host key')
         names = tuple(name for name in PUBLIC_FILES if name != 'manifest.json')
         manifest = {'format': FORMAT, 'target': '3225722 / SZ F26312 / V14.1.5 / AK3918AV130',
                     'stock_sha256': STOCK_SHA, 'port': 2222, 'password_authentication': False,
                     'forwarding': False, 'sftp': False, 'arm926_smoke': bool(qemu),
+                    'credentials_provisioned': keys is not None,
                     'dropbear': reports['dropbear'], 'dropbear_build': build_info,
                     'busybox': reports['busybox'], 'busybox_repository_sources': busybox_inputs,
                     'credentials_excluded_from_checksums': list(PRIVATE_FILES),
@@ -251,9 +317,11 @@ def build(args):
         (runtime / 'manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
         NOR.write_sums(runtime, PUBLIC_FILES)
         (stage / 'README.md').write_text(
-            '# Private YYOS SSH kit\n\n'
+            '# Optional YYOS SSH kit\n\n'
             'Experimental exact-profile root administration using Ed25519 keys on TCP2222. '
-            'This output contains a private host key and owner public key: never publish or commit it. '
+            + ('This output contains a private host key and owner public key: never publish or commit it. ' if keys else
+               'This credential-free output contains no owner keys or enable marker and cannot start SSH until privately provisioned. ')
+            +
             'Only card/LSCamoflash-yyos-ssh is the nested SSH payload. '
             'boot/normal-http-boot.sh is the byte-identical existing HTTP hook, staged as SD-root yyos-http-boot.sh; '
             'boot/boot.sh is the proposed SD-root dump.sh composition. These host files are not an installation command. '
@@ -267,9 +335,9 @@ def build(args):
             'See docs/yyos-ssh.md in the matching public source tree.\n')
         package = {'format': FORMAT + '-host-package', 'builder_sha256': NOR.digest(Path(__file__)),
                    'http_boot_source_sha256': NOR.digest(http), 'ssh_boot_wrapper_sha256': hashlib.sha256(wrapper).hexdigest(),
-                   'private_output': True, 'private_inputs_excluded_from_public_checksums': list(PRIVATE_FILES)}
+                   'private_output': keys is not None, 'private_inputs_excluded_from_public_checksums': list(PRIVATE_FILES)}
         (stage / 'manifest.json').write_text(json.dumps(package, indent=2, sort_keys=True) + '\n')
-        public = ('README.md', 'manifest.json', 'host-key.pub', 'host-key-fingerprint.txt', 'boot/boot.sh', 'boot/normal-http-boot.sh',
+        public = ('README.md', 'manifest.json', *(('host-key.pub', 'host-key-fingerprint.txt') if keys else ()), 'boot/boot.sh', 'boot/normal-http-boot.sh',
                   *('card/LSCamoflash-yyos-ssh/' + name for name in (*PUBLIC_FILES, 'SHA256SUMS')))
         NOR.write_sums(stage, public)
         BACKUP.validate_output(output)
@@ -285,8 +353,10 @@ def main():
     parser.add_argument('--dropbear', type=Path, required=True, help='static ARMv5 Dropbear2026.94 multicall binary')
     parser.add_argument('--dropbear-source', type=Path, required=True, help='pinned hydrated Dropbear2026.94 source tar.bz2')
     parser.add_argument('--dropbear-provenance', type=Path, required=True, help='portable JSON binding build options/source and binary hashes')
-    parser.add_argument('--client-public-key', type=Path, required=True, help='one bare Ed25519 public key; no options or comment')
-    parser.add_argument('--host-key', type=Path, required=True, help='private native Dropbear Ed25519 host key; never an OpenSSH client private key')
+    parser.add_argument('--musl-build', type=Path, help='matching public musl build source, provenance and runtime notices')
+    parser.add_argument('--credential-free', action='store_true', help='public disabled kit without keys or an enable marker')
+    parser.add_argument('--client-public-key', type=Path, help='one bare Ed25519 public key; no options or comment')
+    parser.add_argument('--host-key', type=Path, help='private native Dropbear Ed25519 host key; never an OpenSSH client private key')
     parser.add_argument('--busybox', type=Path, default=REPO / 'SOURCE/backup-kit/card/busybox')
     parser.add_argument('--readelf', default=os.environ.get('READELF', str(REPO / 'SOURCE/toolchain/uclibc/bin/arm-buildroot-linux-uclibcgnueabi-readelf')))
     parser.add_argument('--qemu', default=os.environ.get('QEMU_ARM'), help='optional qemu-arm for ARM926 syntax/server/keytool checks')
