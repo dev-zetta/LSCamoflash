@@ -30,19 +30,71 @@ def public_input(root):
     return root
 
 
-def source_inputs():
+def source_inputs(controls=False):
     names = {'tools/yyos/package-kit.py', 'tools/yyos/install-kit.py', 'tools/yyos/build-kit.py',
              'tools/yyos/build-ssh-kit.py', 'tools/yyos/build-dropbear.py', 'tools/yyos/build-musl.py',
              'tools/yyos/dropbear-localoptions.h', 'tools/yyos/boot.sh', 'tools/yyos/yyos-clock-compat.c',
              'tools/yyos/convert-recording.py', 'tools/yyos/recording-requirements.txt',
              'docs/yyos-setup.md', 'docs/yyos-recordings.md'}
-    for relative in ('SOURCE/src/yyos', 'SOURCE/src/yyos-ssh', 'SOURCE/src/contrib/yyos-recordings'):
+    directories = ['SOURCE/src/yyos', 'SOURCE/src/yyos-ssh', 'SOURCE/src/contrib/yyos-recordings']
+    if controls:
+        names.add('tools/yyos/build-controls.py')
+        names.add('docs/yyos-controls.md')
+        directories.append('SOURCE/src/contrib/yyos-controls')
+    for relative in directories:
         root = REPO / relative
         if root.exists():
             for path in root.rglob('*'):
                 if path.is_file():
                     names.add(path.relative_to(REPO).as_posix())
     return {name: INSTALL.sha(INSTALL.regular(REPO / name)) for name in sorted(names)}
+
+
+def controls_builder():
+    return module('yyos_package_management_builder', INSTALL.regular(REPO / 'tools/yyos/build-kit.py'))
+
+
+def validate_controls_cgi(runtime, libc):
+    manifest = INSTALL.read_json(runtime / 'manifest.json')
+    proof = manifest.get('controls_cgi', {})
+    source = REPO / 'SOURCE/src/contrib/yyos-controls/yyos_controls_cgi.c'
+    objects = manifest.get('controls_provenance', {}).get('objects', [])
+    clocks = [entry.get('object_sha256') for entry in objects if isinstance(entry, dict)
+              and entry.get('object') == 'objects/clock.o'] if isinstance(objects, list) else []
+    if (proof.get('source_sha256') != INSTALL.sha(INSTALL.regular(source))
+            or proof.get('binary_sha256') != INSTALL.sha(INSTALL.regular(runtime / 'bin/yyos-controls-cgi'))
+            or proof.get('libc_provenance_sha256') != libc.get('provenance_sha256')
+            or proof.get('clock_compat_sha256') != SSH.CLOCK_SOURCE_SHA
+            or len(clocks) != 1 or proof.get('clock_object_sha256') != clocks[0]
+            or proof.get('cflags') != list(controls_builder().BACKUP.FLAGS)
+            or proof.get('elf') != manifest.get('helpers', {}).get('yyos-controls-cgi')):
+        raise ValueError('Controls CGI differs from current source/binary/libc/clock provenance')
+
+
+def validate_packaged_controls(sources_root, runtime, libc):
+    """Revalidate relocated public controls evidence using the shared builder."""
+    sources_root = INSTALL.clean(sources_root)
+    controls = sources_root / 'controls'
+    validate_controls_cgi(runtime, libc)
+    cgi_source = INSTALL.regular(sources_root / 'yyos_controls_cgi.c')
+    if INSTALL.sha(cgi_source) != INSTALL.sha(INSTALL.regular(REPO / 'SOURCE/src/contrib/yyos-controls/yyos_controls_cgi.c')):
+        raise ValueError('Packaged controls CGI source differs from current source')
+    names = INSTALL.tree(controls)
+    if not names or len(names) > 128:
+        raise ValueError('Invalid packaged controls source/object inventory')
+    expected = INSTALL.read_json(runtime / 'manifest.json').get('controls_provenance')
+    with tempfile.TemporaryDirectory(prefix='yyos-packaged-controls-') as temporary:
+        root = Path(temporary)
+        # Restore only known build-relative locations; never extract or execute
+        # a packaged script. The validator imports the current project builder.
+        for name in names:
+            INSTALL.safe_name(name)
+            INSTALL.write_new(root / name, INSTALL.regular(controls / name).read_bytes())
+        _, mapping = controls_builder().validate_controls(root, runtime=runtime, expected_proof=expected, libc=libc)
+        if set(mapping) != names:
+            raise ValueError('Packaged controls contains unknown or missing source/object files')
+    return {'yyos_controls_cgi.c': cgi_source,
+            **{'controls/' + name: controls / name for name in sorted(names)}}
 
 
 def build(args):
@@ -57,6 +109,14 @@ def build(args):
     INSTALL.runtime(secure, ssh=True)
     main = INSTALL.read_json(http / 'manifest.json')
     server = INSTALL.read_json(secure / 'manifest.json')
+    control_payload = {'bin/yyos-controls', 'bin/yyos-controls-cgi', 'COPYING.Controls',
+                       'controls-provenance.json', 'www/cgi-bin/controls.cgi'}
+    control_files = set(main['files']) & control_payload
+    controls = getattr(args, 'controls_build', None)
+    if control_files and control_files != control_payload:
+        raise ValueError('Controls helpers, CGI, license and provenance must be included together')
+    if bool(control_files) != (controls is not None):
+        raise ValueError('Included controls require their matching --controls-build, and vice versa')
     if main.get('credentials_provisioned') is not False or main.get('arm926_smoke') is not True:
         raise ValueError('Public management input must be credential-free and ARM926-tested')
     if server.get('credentials_provisioned') is not False or server.get('arm926_smoke') is not True:
@@ -105,7 +165,14 @@ def build(args):
     if INSTALL.sha(source_archive) != SSH.SOURCE_SHA:
         raise ValueError('Dropbear source archive differs from its pinned identity')
     SSH.clock_proof(provenance, source_archive, dropbear / 'yyos-clock-compat.o')
-    projects = source_inputs()
+    controls_proof = None
+    control_sources = {}
+    if controls is not None:
+        controls = INSTALL.clean(controls)
+        validate_controls_cgi(http, libc)
+        controls_proof, control_sources = controls_builder().validate_controls(controls, runtime=http,
+                                    expected_proof=main.get('controls_provenance'), libc=libc)
+    projects = source_inputs(controls=controls is not None)
     readelf = SSH.NOR.executable(args.readelf)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.yyos-package-', dir=output.parent) as temporary:
@@ -124,6 +191,8 @@ def build(args):
         INSTALL.write_new(stage / 'install-kit.py', (REPO / 'tools/yyos/install-kit.py').read_bytes(), True)
         INSTALL.write_new(stage / 'SETUP.md', (REPO / 'docs/yyos-setup.md').read_bytes())
         INSTALL.write_new(stage / 'RECORDINGS.md', (REPO / 'docs/yyos-recordings.md').read_bytes())
+        if controls is not None:
+            INSTALL.write_new(stage / 'CONTROLS.md', INSTALL.regular(REPO / 'docs/yyos-controls.md').read_bytes())
         INSTALL.write_new(stage / 'tools/convert-recording.py', (REPO / 'tools/yyos/convert-recording.py').read_bytes(), True)
         INSTALL.write_new(stage / 'tools/recording-requirements.txt', (REPO / 'tools/yyos/recording-requirements.txt').read_bytes())
         INSTALL.write_new(stage / 'README.md',
@@ -137,13 +206,23 @@ def build(args):
                         'yyos-clock-compat.o': dropbear / 'yyos-clock-compat.o'}
         for name, path in source_files.items():
             INSTALL.write_new(stage / 'sources' / name, INSTALL.regular(path).read_bytes())
+        if controls is not None:
+            INSTALL.write_new(stage / 'sources/yyos_controls_cgi.c',
+                              INSTALL.regular(REPO / 'SOURCE/src/contrib/yyos-controls/yyos_controls_cgi.c').read_bytes())
         INSTALL.write_new(stage / 'sources/dropbear-provenance.json', (json.dumps(provenance, indent=2, sort_keys=True) + '\n').encode())
+        for name, path in control_sources.items():
+            INSTALL.safe_name(name)
+            INSTALL.write_new(stage / 'sources/controls' / name, INSTALL.regular(path).read_bytes())
+        if controls is not None:
+            validate_packaged_controls(stage / 'sources', card / INSTALL.HTTP, libc)
         public = INSTALL.tree(stage)
         version = (REPO / 'SOURCE/version.txt').read_text().strip()
         manifest = {'format': INSTALL.FORMAT, 'stock_sha256': INSTALL.STOCK_SHA, 'credential_free': True,
                     'version': version, 'arm926_smoke': True, 'ssh_optional_default_disabled': True,
                     'libc': libc, 'binaries': binaries, 'project_sources': projects,
                     'files': {name: INSTALL.sha(stage / name) for name in sorted(public)}}
+        if controls_proof is not None:
+            manifest['controls_provenance'] = controls_proof
         INSTALL.write_new(stage / 'manifest.json', (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode())
         SSH.NOR.write_sums(stage, public | {'manifest.json'})
         INSTALL.validate_kit(stage, public=True)
@@ -162,6 +241,7 @@ def main():
     parser.add_argument('--ssh-kit', type=Path, required=True)
     parser.add_argument('--dropbear-build', type=Path, required=True)
     parser.add_argument('--musl-build', type=Path, required=True)
+    parser.add_argument('--controls-build', type=Path, help='matching optional build-controls.py output')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--readelf', default=os.environ.get('READELF', str(REPO / 'SOURCE/toolchain/uclibc/bin/arm-buildroot-linux-uclibcgnueabi-readelf')))
     args = parser.parse_args()

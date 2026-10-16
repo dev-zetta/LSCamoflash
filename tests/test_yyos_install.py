@@ -19,6 +19,13 @@ SPEC.loader.exec_module(I)
 AUTH = b'I:index.html\n/:admin:$1$fixture$abcdefghijklmnopqrstuv\n'
 CLIENT = b'ssh-ed25519 ' + base64.b64encode(b'\0\0\0\x0bssh-ed25519\0\0\0\x20' + bytes(range(1, 33))) + b'\n'
 HOST = b'\0\0\0\x0bssh-ed25519\0\0\0\x40' + bytes(range(1, 65))
+CONTROL_KEY = b'SyntheticKey1234'
+
+
+def native_document():
+    return {'format': 'lscamoflash-yyos-native-credentials-v1', 'profile': 'lsc-3225722-yyos-14.1.5',
+            'firmware_version': '14.1.5', 'app_sha256': I.STOCK_SHA, 'protocol_version': 3.5,
+            'device_id': 'FakeCameraDevice000001', 'local_key': CONTROL_KEY.decode()}
 
 
 def write(path, data):
@@ -51,6 +58,22 @@ def fixture_kit(kit):
     sums(kit, public | {'manifest.json'})
 
 
+def reseal_kit(kit):
+    """Recompute all manifests/checksums after a deliberate structural mutation."""
+    for folder in (I.HTTP, I.SSH):
+        root = kit / 'card' / folder
+        manifest = I.read_json(root / 'manifest.json')
+        manifest['files'] = {name: I.sha(root / name) for name in manifest['files']}
+        write(root / 'manifest.json', json.dumps(manifest).encode())
+        sums(root, set(manifest['files']) | {'manifest.json'})
+    sums(kit / 'card', I.tree(kit / 'card') - {'SHA256SUMS'} - I.SITE)
+    manifest = I.read_json(kit / 'manifest.json')
+    public = I.tree(kit) - {'manifest.json', 'SHA256SUMS'} - {'card/' + name for name in I.SITE}
+    manifest['files'] = {name: I.sha(kit / name) for name in public}
+    write(kit / 'manifest.json', json.dumps(manifest).encode())
+    sums(kit, public | {'manifest.json'})
+
+
 class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='yyos-install-test-')
@@ -70,6 +93,26 @@ class InstallerTests(unittest.TestCase):
         if ssh:
             for name, data in (('authorized_keys', CLIENT), ('dropbear_ed25519_host_key', HOST), ('ssh.enabled', b'enabled\n')):
                 write(self.kit / 'card' / I.SSH / name, data)
+
+    def controls_payload(self):
+        runtime = self.kit / 'card' / I.HTTP
+        manifest = I.read_json(runtime / 'manifest.json')
+        proof = {'synthetic_public_controls_proof': True, 'app_sha256': I.STOCK_SHA}
+        for name in I.HTTP_CONTROLS:
+            write(runtime / name, b'Synthetic public controls payload')
+            if name == 'controls-provenance.json':
+                write(runtime / name, json.dumps(proof).encode())
+            manifest['files'][name] = I.sha(runtime / name)
+        manifest['controls_provenance'] = proof
+        write(runtime / 'manifest.json', json.dumps(manifest).encode())
+        sums(runtime, set(manifest['files']) | {'manifest.json'})
+        sums(self.kit / 'card', I.tree(self.kit / 'card') - {'SHA256SUMS'})
+        public = I.tree(self.kit) - {'manifest.json', 'SHA256SUMS'}
+        manifest = I.read_json(self.kit / 'manifest.json')
+        manifest['controls_provenance'] = proof
+        manifest['files'] = {name: I.sha(self.kit / name) for name in public}
+        write(self.kit / 'manifest.json', json.dumps(manifest).encode())
+        sums(self.kit, public | {'manifest.json'})
 
     def execute(self, perform=True):
         with patch.object(I, 'mounted_card', return_value=self.identity):
@@ -234,6 +277,142 @@ class InstallerTests(unittest.TestCase):
         for path in (args.output / 'card').rglob('*'):
             if path.is_file():
                 self.assertNotIn(b'OPENSSH PRIVATE KEY', path.read_bytes())
+
+    def test_optional_native_key_provisions_only_raw_key_outside_public_inventory(self):
+        self.controls_payload()
+        source = self.root / 'native-credentials'
+        source.write_text(json.dumps(native_document())); source.chmod(0o600)
+        password = self.root / 'web-password'
+        password.write_bytes(b'fixture-private-password\n'); password.chmod(0o600)
+        args = SimpleNamespace(kit=self.kit, output=self.root / 'private', username='admin', password_file=password,
+                               client_public_key=None, host_key=None, generate_ssh_keys=False, native_credentials=source)
+        result = I.provision(args)
+        target = args.output / 'card' / I.HTTP / 'native-control.key'
+        self.assertTrue(result['native_controls_provisioned'])
+        self.assertEqual(target.read_bytes(), CONTROL_KEY)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        I.validate_kit(args.output)
+        for path in args.output.rglob('*'):
+            if path.is_file() and path != target:
+                self.assertNotIn(CONTROL_KEY, path.read_bytes())
+                self.assertNotIn(b'FakeCameraDevice000001', path.read_bytes())
+        with self.assertRaises(ValueError):
+            I.validate_kit(args.output, public=True)
+        self.assertNotIn(I.HTTP + '/native-control.key', I.sums(args.output / 'card', args.output / 'card/SHA256SUMS'))
+
+    def test_native_credentials_schema_key_ascii_duplicates_and_permissions_refuse(self):
+        source = self.root / 'credentials'
+        for changed in ({'profile': 'other'}, {'app_sha256': '0' * 64}, {'local_key': 'x' * 15},
+                        {'local_key': 'é' * 16}, {'local_key': 'x' * 15 + '\n'}, {'protocol_version': True}):
+            value = native_document(); value.update(changed)
+            source.write_text(json.dumps(value)); source.chmod(0o600)
+            with self.subTest(fields=list(changed)), self.assertRaises(ValueError) as caught:
+                I.native_credentials(source)
+            self.assertNotIn(CONTROL_KEY.decode(), str(caught.exception))
+        source.write_text(json.dumps(native_document())[:-1] + ',"local_key":"different"}')
+        with self.assertRaises(ValueError):
+            I.native_credentials(source)
+        source.write_text(json.dumps(native_document())); source.chmod(0o644)
+        with self.assertRaises(ValueError):
+            I.native_credentials(source)
+
+    def test_controls_credentials_refuse_missing_optional_payload_before_output(self):
+        source = self.root / 'credentials'
+        source.write_text(json.dumps(native_document())); source.chmod(0o600)
+        password = self.root / 'password'; password.write_bytes(b'fixture-password\n'); password.chmod(0o600)
+        args = SimpleNamespace(kit=self.kit, output=self.root / 'private', username='admin', password_file=password,
+                               client_public_key=None, host_key=None, generate_ssh_keys=False, native_credentials=source)
+        with self.assertRaisesRegex(ValueError, 'optional controls payload'):
+            I.provision(args)
+        self.assertFalse(args.output.exists())
+
+    def test_existing_controls_key_is_preserved_on_upgrade_and_never_hashed_publicly(self):
+        self.controls_payload(); self.private()
+        write(self.kit / 'card' / I.HTTP / 'native-control.key', CONTROL_KEY)
+        self.execute()
+        write(self.kit / 'card' / I.HTTP / 'native-control.key', b'DifferentKey1234')
+        result = self.execute()
+        self.assertEqual(result['native_controls_key'], 'existing-preserved')
+        self.assertEqual((self.mount / I.HTTP / 'native-control.key').read_bytes(), CONTROL_KEY)
+        self.assertEqual((self.mount / result['archive'] / I.HTTP / 'native-control.key').read_bytes(), CONTROL_KEY)
+        self.assertNotIn(I.HTTP + '/native-control.key', I.sums(self.mount, self.mount / 'SHA256SUMS'))
+
+    def test_coherently_hashed_native_key_is_still_refused_as_public_payload(self):
+        name = 'card/' + I.HTTP + '/native-control.key'
+        write(self.kit / name, CONTROL_KEY)
+        manifest = I.read_json(self.kit / 'manifest.json')
+        manifest['files'][name] = I.sha(self.kit / name)
+        write(self.kit / 'manifest.json', json.dumps(manifest).encode())
+        sums(self.kit, set(manifest['files']) | {'manifest.json'})
+        with self.assertRaisesRegex(ValueError, 'Site provisioning files'):
+            I.validate_kit(self.kit, public=True)
+
+    def test_declared_and_checksummed_unknown_runtime_files_are_refused(self):
+        for index, (folder, name) in enumerate(((I.HTTP, 'foo'), (I.HTTP, 'owner-private.txt'),
+                                                (I.SSH, 'foo'), (I.SSH, 'www/cgi-bin/recordings.cgi'))):
+            kit = self.root / ('unknown-' + str(index)); fixture_kit(kit)
+            root = kit / 'card' / folder
+            write(root / name, b'Unknown declared file must never be published')
+            manifest = I.read_json(root / 'manifest.json')
+            manifest['files'][name] = I.sha(root / name)
+            write(root / 'manifest.json', json.dumps(manifest).encode()); reseal_kit(kit)
+            with self.subTest(folder=folder, name=name), self.assertRaisesRegex(ValueError, 'Unknown declared runtime file'):
+                I.validate_kit(kit, public=True)
+
+    def test_optional_recordings_group_is_complete_or_absent(self):
+        runtime = self.kit / 'card' / I.HTTP
+        manifest = I.read_json(runtime / 'manifest.json')
+        for name in I.HTTP_RECORDINGS:
+            write(runtime / name, b'Synthetic public recording payload')
+            manifest['files'][name] = I.sha(runtime / name)
+        write(runtime / 'manifest.json', json.dumps(manifest).encode()); reseal_kit(self.kit)
+        I.validate_kit(self.kit, public=True)
+        name = 'bin/yyos-recordings'
+        (runtime / name).unlink(); manifest['files'].pop(name)
+        write(runtime / 'manifest.json', json.dumps(manifest).encode()); reseal_kit(self.kit)
+        with self.assertRaisesRegex(ValueError, 'Incomplete optional runtime group'):
+            I.validate_kit(self.kit, public=True)
+
+    def test_partial_controls_group_is_refused_even_with_matching_proof(self):
+        self.controls_payload()
+        runtime = self.kit / 'card' / I.HTTP
+        manifest = I.read_json(runtime / 'manifest.json')
+        name = 'bin/yyos-controls-cgi'
+        (runtime / name).unlink(); manifest['files'].pop(name)
+        write(runtime / 'manifest.json', json.dumps(manifest).encode()); reseal_kit(self.kit)
+        with self.assertRaisesRegex(ValueError, 'Incomplete optional runtime group'):
+            I.validate_kit(self.kit, public=True)
+
+    def test_controls_proof_must_match_runtime_file_and_package(self):
+        for field in ('runtime-missing', 'file-mismatch', 'package-missing', 'package-mismatch', 'empty-proof'):
+            self.kit = self.root / field; fixture_kit(self.kit); self.controls_payload()
+            runtime = self.kit / 'card' / I.HTTP
+            manifest = I.read_json(runtime / 'manifest.json')
+            package = I.read_json(self.kit / 'manifest.json')
+            if field == 'runtime-missing':
+                manifest.pop('controls_provenance')
+            elif field == 'file-mismatch':
+                write(runtime / 'controls-provenance.json', b'{"different":true}')
+            elif field == 'package-missing':
+                package.pop('controls_provenance')
+            elif field == 'package-mismatch':
+                package['controls_provenance'] = {'different': True}
+            else:
+                manifest['controls_provenance'] = package['controls_provenance'] = {}
+                write(runtime / 'controls-provenance.json', b'{}')
+            write(runtime / 'manifest.json', json.dumps(manifest).encode())
+            write(self.kit / 'manifest.json', json.dumps(package).encode()); reseal_kit(self.kit)
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, '[Cc]ontrols.*provenance'):
+                I.validate_kit(self.kit, public=True)
+
+    def test_controls_proof_without_controls_group_is_refused(self):
+        for level in ('runtime', 'package'):
+            kit = self.root / ('unexpected-proof-' + level); fixture_kit(kit)
+            path = kit / ('card/' + I.HTTP if level == 'runtime' else '') / 'manifest.json'
+            manifest = I.read_json(path); manifest['controls_provenance'] = {'unrelated': True}
+            write(path, json.dumps(manifest).encode()); reseal_kit(kit)
+            with self.subTest(level=level), self.assertRaisesRegex(ValueError, 'provenance requires'):
+                I.validate_kit(kit, public=True)
 
     def test_known_normal_http_upgrade_can_add_optional_ssh(self):
         self.private(ssh=True)

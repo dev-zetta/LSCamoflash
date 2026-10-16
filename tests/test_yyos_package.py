@@ -1,5 +1,6 @@
 """Credential-free combined artifact controls; all inputs are synthetic public files."""
 import importlib.util
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -9,7 +10,7 @@ import struct
 import tarfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -123,6 +124,67 @@ class PackageTests(unittest.TestCase):
                       patch.object(P.SSH.NOR, 'validate_arm_elf', side_effect=lambda path, reader: {'static': True, 'cpu_arch': 'v5TEJ', 'sha256': I.sha(path), 'bytes': path.stat().st_size})):
             guard.start(); self.addCleanup(guard.stop)
 
+    def controls_fixture(self):
+        root = self.root / 'controls'
+        runtime = self.management / 'card' / I.HTTP
+        bridge = b'Public fixture controls C source\n'
+        cgi = b'Public fixture controls CGI C source\n'
+        F.write(self.repo / 'SOURCE/src/contrib/yyos-controls/yyos_controls.c', bridge)
+        F.write(self.repo / 'SOURCE/src/contrib/yyos-controls/yyos_controls_cgi.c', cgi)
+        F.write(self.repo / 'tools/yyos/build-controls.py', b'Public fixture controls recipe\n')
+        F.write(self.repo / 'docs/yyos-controls.md', b'Public fixture guarded controls instructions\n')
+        files = {'bin/yyos-controls': b'Public fixture static controls executable',
+                 'COPYING.Controls': b'Public fixture component notices',
+                 'sources/yyos_controls.c': bridge, 'objects/controls.o': b'Public fixture ARM object',
+                 'objects/clock.o': b'Public fixture ARM clock object'}
+        proof = {'binary_sha256': hashlib.sha256(files['bin/yyos-controls']).hexdigest(),
+                 'libc': self.libc, 'fixture_public_proof': True,
+                 'objects': [{'object': 'objects/clock.o',
+                              'object_sha256': hashlib.sha256(files['objects/clock.o']).hexdigest()}]}
+        files['provenance.json'] = json.dumps(proof).encode()
+        for name, data in files.items():
+            F.write(root / name, data)
+        for name, data in {'bin/yyos-controls': files['bin/yyos-controls'],
+                           'bin/yyos-controls-cgi': b'Public fixture controls CGI executable',
+                           'COPYING.Controls': files['COPYING.Controls'],
+                           'controls-provenance.json': files['provenance.json'],
+                           'www/cgi-bin/controls.cgi': b'#!/bin/sh\n# public fixture CGI\n'}.items():
+            F.write(runtime / name, data)
+        manifest = I.read_json(runtime / 'manifest.json')
+        manifest['controls_provenance'] = proof
+        report = {'static': True, 'sha256': I.sha(runtime / 'bin/yyos-controls-cgi')}
+        manifest['helpers'] = {'yyos-controls-cgi': report}
+        manifest['controls_cgi'] = {'source_sha256': I.sha(self.repo / 'SOURCE/src/contrib/yyos-controls/yyos_controls_cgi.c'),
+                                  'binary_sha256': I.sha(runtime / 'bin/yyos-controls-cgi'),
+                                  'libc_provenance_sha256': self.libc['provenance_sha256'],
+                                  'clock_compat_sha256': P.SSH.CLOCK_SOURCE_SHA, 'elf': report,
+                                  'clock_object_sha256': proof['objects'][0]['object_sha256'],
+                                  'cflags': ['-static', 'fixture-compile-flags']}
+        manifest['files'] = {name: I.sha(runtime / name) for name in I.tree(runtime) - {'manifest.json', 'SHA256SUMS'}}
+        F.write(runtime / 'manifest.json', json.dumps(manifest).encode())
+        F.sums(runtime, set(manifest['files']) | {'manifest.json'})
+        F.sums(self.management / 'card', I.tree(self.management / 'card') - {'SHA256SUMS'})
+        F.sums(self.management, I.tree(self.management) - {'SHA256SUMS'})
+        F.write(self.repo / 'SOURCE/src/yyos/www/cgi-bin/controls.cgi', (runtime / 'www/cgi-bin/controls.cgi').read_bytes())
+        def validate(build_root, runtime=None, expected_proof=None, libc=None):
+            if expected_proof != proof or libc != self.libc:
+                raise ValueError('Fixture controls proof/libc mismatch')
+            mapping = {}
+            for name, data in files.items():
+                path = I.regular(build_root / name)
+                if path.read_bytes() != data:
+                    raise ValueError('Fixture retained controls source/object mismatch')
+                mapping[name] = path
+            if (runtime / 'bin/yyos-controls').read_bytes() != files['bin/yyos-controls']:
+                raise ValueError('Fixture controls runtime mismatch')
+            return proof, mapping
+        validator = SimpleNamespace(validate_controls=Mock(side_effect=validate),
+                                    BACKUP=SimpleNamespace(FLAGS=['-static', 'fixture-compile-flags']))
+        guard = patch.object(P, 'controls_builder', return_value=validator)
+        guard.start(); self.addCleanup(guard.stop)
+        self.args.controls_build = root
+        return root, validator
+
     def test_combined_inventory_disabled_ssh_sources_and_checksums(self):
         output = P.build(self.args)
         manifest = I.validate_kit(output, public=True)
@@ -186,6 +248,63 @@ class PackageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             P.build(self.args)
         self.assertEqual((self.args.output / 'keep').read_bytes(), b'preserve')
+
+    def test_optional_controls_retains_validated_mapping_and_revalidates_relocation(self):
+        root, validator = self.controls_fixture()
+        output = P.build(self.args)
+        manifest = I.validate_kit(output, public=True)
+        self.assertIn('controls_provenance', manifest)
+        self.assertEqual((output / 'sources/controls/objects/controls.o').read_bytes(),
+                         (root / 'objects/controls.o').read_bytes())
+        self.assertIn('tools/yyos/build-controls.py', manifest['project_sources'])
+        self.assertIn('docs/yyos-controls.md', manifest['project_sources'])
+        self.assertTrue((output / 'CONTROLS.md').is_file())
+        self.assertEqual((output / 'sources/yyos_controls_cgi.c').read_bytes(),
+                         (self.repo / 'SOURCE/src/contrib/yyos-controls/yyos_controls_cgi.c').read_bytes())
+        self.assertIn('SOURCE/src/contrib/yyos-controls/yyos_controls_cgi.c', manifest['project_sources'])
+        self.assertEqual(validator.validate_controls.call_count, 2)
+        self.assertFalse((output / 'card' / I.HTTP / 'native-control.key').exists())
+
+    def test_controls_input_is_required_exactly_when_complete_payload_is_included(self):
+        self.args.controls_build = self.root / 'unknown-controls'
+        with self.assertRaisesRegex(ValueError, 'matching --controls-build'):
+            P.build(self.args)
+        self.controls_fixture()
+        self.args.controls_build = None
+        with self.assertRaisesRegex(ValueError, 'matching --controls-build'):
+            P.build(self.args)
+
+    def test_controls_source_object_or_cgi_proof_mismatch_cannot_publish(self):
+        root, validator = self.controls_fixture()
+        (root / 'objects/controls.o').write_bytes(b'Corrupted retained object')
+        with self.assertRaisesRegex(ValueError, 'source/object mismatch'):
+            P.build(self.args)
+        self.assertFalse(self.args.output.exists())
+        runtime = self.management / 'card' / I.HTTP
+        manifest = I.read_json(runtime / 'manifest.json')
+        original = dict(manifest['controls_cgi'])
+        for field, value in (('source_sha256', '0' * 64), ('clock_object_sha256', '0' * 64), ('cflags', [])):
+            manifest['controls_cgi'] = {**original, field: value}
+            F.write(runtime / 'manifest.json', json.dumps(manifest).encode())
+            F.sums(runtime, set(manifest['files']) | {'manifest.json'})
+            F.sums(self.management / 'card', I.tree(self.management / 'card') - {'SHA256SUMS'})
+            F.sums(self.management, I.tree(self.management) - {'SHA256SUMS'})
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'Controls CGI differs'):
+                P.build(self.args)
+
+    def test_packaged_controls_unknown_file_or_symlink_is_refused(self):
+        self.controls_fixture()
+        output = P.build(self.args)
+        controls = output / 'sources/controls'
+        extra = controls / 'unexpected-private-file'
+        extra.write_bytes(b'Never distribute this unknown file')
+        with self.assertRaisesRegex(ValueError, 'unknown or missing'):
+            P.validate_packaged_controls(output / 'sources', output / 'card' / I.HTTP, self.libc)
+        extra.unlink()
+        link = controls / 'objects/link.o'
+        link.symlink_to(controls / 'objects/controls.o')
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            P.validate_packaged_controls(output / 'sources', output / 'card' / I.HTTP, self.libc)
 
 
 if __name__ == '__main__':

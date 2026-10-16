@@ -299,12 +299,18 @@ def validate_yyos(repo, version, copying):
             or libc.get('name') != 'musl' or libc.get('version') != '1.2.6'):
         raise ValueError('YYOS release requires the matching credential-free ARM926 HTTP/optional musl SSH package')
     projects = manifest.get('project_sources')
+    management = json.loads(regular(kit / 'card' / installer.HTTP / 'manifest.json').read_text())
+    controls = management.get('controls_provenance')
     required = {'tools/yyos/package-kit.py', 'tools/yyos/install-kit.py', 'tools/yyos/build-kit.py',
                 'tools/yyos/build-ssh-kit.py', 'tools/yyos/build-dropbear.py', 'tools/yyos/build-musl.py',
                 'tools/yyos/dropbear-localoptions.h', 'tools/yyos/boot.sh', 'tools/yyos/yyos-clock-compat.c',
                 'tools/yyos/convert-recording.py', 'tools/yyos/recording-requirements.txt',
                 'docs/yyos-setup.md', 'docs/yyos-recordings.md'}
-    for directory in ('SOURCE/src/yyos', 'SOURCE/src/yyos-ssh', 'SOURCE/src/contrib/yyos-recordings'):
+    directories = ['SOURCE/src/yyos', 'SOURCE/src/yyos-ssh', 'SOURCE/src/contrib/yyos-recordings']
+    if controls is not None:
+        required |= {'tools/yyos/build-controls.py', 'docs/yyos-controls.md'}
+        directories.append('SOURCE/src/contrib/yyos-controls')
+    for directory in directories:
         root = repo / directory
         if root.exists():
             required |= {path.relative_to(repo).as_posix() for path in root.rglob('*') if path.is_file()}
@@ -321,6 +327,10 @@ def validate_yyos(repo, version, copying):
                     'yyos-clock-compat.c', 'yyos-clock-compat.o'}
     exact = {'README.md', 'SETUP.md', 'RECORDINGS.md', 'install-kit.py', 'tools/convert-recording.py',
              'tools/recording-requirements.txt'} | {'sources/' + name for name in source_names}
+    if controls is not None:
+        package = source_module('yyos_release_package', regular(repo / 'tools/yyos/package-kit.py'))
+        controls_files = package.validate_packaged_controls(kit / 'sources', kit / 'card' / installer.HTTP, libc)
+        exact |= {'CONTROLS.md'} | {'sources/' + name for name in controls_files}
     exact |= {'card/' + name for name in installer.tree(card)}
     if set(manifest['files']) != exact:
         raise ValueError('YYOS package contains unknown or missing host files, including private/untracked data')
@@ -333,6 +343,8 @@ def validate_yyos(repo, version, copying):
                                'tools/recording-requirements.txt': 'tools/yyos/recording-requirements.txt'}.items():
         if digest(kit / packaged) != digest(repo / original):
             raise ValueError('YYOS packaged installer/build source differs from current source')
+    if controls is not None and digest(regular(kit / 'CONTROLS.md')) != digest(regular(repo / 'docs/yyos-controls.md')):
+        raise ValueError('YYOS packaged controls guide differs from current source')
     if (card / 'yyos-http-boot.sh').read_bytes() != regular(repo / 'tools/yyos/boot.sh').read_bytes() \
             or (card / 'dump.sh').read_bytes() != ssh.boot_wrapper(digest(card / 'yyos-http-boot.sh')):
         raise ValueError('YYOS combined boot wrapper differs from current source')
@@ -400,7 +412,7 @@ def notices(repo, version, source_name, inputs):
     summary = regular(repo / "SOURCE/3RD_PARTY_LICENSES.md").read_text()
     return f"""# LSCamoflash {version}: third-party notices
 
-The project-authored code is covered by LICENSE.MIT. The runtime, backup kit and separate Fullhan/YYOS management kits also contain independently licensed third-party software; this distribution as a whole is not licensed solely under MIT. COPYING.BusyBox contains the GPL version 2 text supplied with the exact BusyBox source input. The Fullhan archive additionally includes COPYING.ONVIF for its isolated static ONVIF server, gSOAP authentication code with its OpenSSL linking exception, OpenSSL, zlib and toolchain runtime components; retain these component notices. The separate YYOS archive includes disabled optional SSH, pinned Dropbear and musl source archives/build provenance, their notices and the GCC runtime exception notice. Neither management archive contains site HTTP/ONVIF/SSH credentials, SSH enable markers or site UUIDs; provision authentication privately before startup.
+The project-authored code is covered by LICENSE.MIT. The runtime, backup kit and separate Fullhan/YYOS management kits also contain independently licensed third-party software; this distribution as a whole is not licensed solely under MIT. COPYING.BusyBox contains the GPL version 2 text supplied with the exact BusyBox source input. The Fullhan archive additionally includes COPYING.ONVIF for its isolated static ONVIF server, gSOAP authentication code with its OpenSSL linking exception, OpenSSL, zlib and toolchain runtime components; retain these component notices. The separate YYOS archive includes disabled optional SSH, pinned Dropbear and musl source archives/build provenance, their notices and the GCC runtime exception notice. Its optional native controls include COPYING.Controls, the exact LibTomCrypt integration sources/patches and relinkable objects. Neither management archive contains site HTTP/ONVIF/SSH credentials, native LAN keys, SSH enable markers or site UUIDs; provision authentication privately before startup.
 
 The accompanying `{source_name}` contains the Git-tracked public repository files, including build recipes, patches, configurations and project notices, plus every hydrated input explicitly listed by SOURCE/Makefile URLS. Untracked working directories, private research and undeclared download files are excluded. Source archives retain their upstream license texts. FFmpeg is built with --enable-gpl and --enable-version3, giving this build GPL version 3 or later licensing.
 

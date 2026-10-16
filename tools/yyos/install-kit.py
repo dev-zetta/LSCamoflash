@@ -24,9 +24,12 @@ SSH = 'LSCamoflash-yyos-ssh'
 ROOT_FILES = {'telnetd', 'busybox', 'dump.sh', 'yyos-http-boot.sh', 'yy_telnet_start', 'SHA256SUMS'}
 HTTP_BASE = {'common.sh', 'start.sh', 'stop.sh', 'README.md', 'bin/busybox', 'www/index.html',
              'www/dashboard.js', 'www/dashboard.css', 'www/cgi-bin/status.cgi', 'LICENSE.MIT', 'COPYING.BusyBox'}
+HTTP_RECORDINGS = {'bin/yyos-recordings', 'www/cgi-bin/recordings.cgi'}
+HTTP_CONTROLS = {'bin/yyos-controls', 'bin/yyos-controls-cgi', 'COPYING.Controls',
+                 'controls-provenance.json', 'www/cgi-bin/controls.cgi'}
 SSH_BASE = {'common.sh', 'start.sh', 'stop.sh', 'README.md', 'bin/busybox', 'bin/dropbear',
             'LICENSE.MIT', 'COPYING.BusyBox', 'COPYING.Dropbear'}
-SITE = {HTTP + '/httpd.conf', SSH + '/authorized_keys', SSH + '/dropbear_ed25519_host_key', SSH + '/ssh.enabled'}
+SITE = {HTTP + '/httpd.conf', HTTP + '/native-control.key', SSH + '/authorized_keys', SSH + '/dropbear_ed25519_host_key', SSH + '/ssh.enabled'}
 HOST_SITE = {'provisioning.json', 'owner_ssh_ed25519', 'owner_ssh_ed25519.pub', 'host-key.pub', 'host-key-fingerprint.txt'}
 EMPTY_SHA = hashlib.sha256(b'').hexdigest()
 FILE_LIMIT = 64 * 1024 * 1024
@@ -114,9 +117,24 @@ def runtime(root, ssh=False, allow_site=False):
     base = SSH_BASE if ssh else HTTP_BASE
     if not isinstance(files, dict) or not base <= set(files):
         raise ValueError('Incomplete runtime manifest')
-    forbidden = {'authorized_keys', 'dropbear_ed25519_host_key', 'ssh.enabled', 'startup.log', 'httpd.conf'}
+    forbidden = {'authorized_keys', 'dropbear_ed25519_host_key', 'ssh.enabled', 'startup.log', 'httpd.conf', 'native-control.key'}
     if set(files) & forbidden:
         raise ValueError('Site credentials and logs cannot enter the public runtime inventory')
+    known = set(base)
+    if not ssh:
+        for group in (HTTP_RECORDINGS, HTTP_CONTROLS):
+            included = set(files) & group
+            if included and included != group:
+                raise ValueError('Incomplete optional runtime group')
+            known |= included
+    if set(files) != known:
+        raise ValueError('Unknown declared runtime file')
+    if not ssh and HTTP_CONTROLS <= set(files):
+        proof = manifest.get('controls_provenance')
+        if not isinstance(proof, dict) or not proof or proof != read_json(root / 'controls-provenance.json'):
+            raise ValueError('Controls runtime provenance is missing or mismatched')
+    elif 'controls_provenance' in manifest:
+        raise ValueError('Controls provenance requires its complete runtime group')
     for name, value in files.items():
         safe_name(name)
         if not re.fullmatch(r'[0-9a-f]{64}', str(value)) or sha(regular(root / name)) != value:
@@ -124,7 +142,7 @@ def runtime(root, ssh=False, allow_site=False):
     expected = set(files) | {'manifest.json', 'SHA256SUMS'}
     if set(sums(root, root / 'SHA256SUMS')) != expected - {'SHA256SUMS'}:
         raise ValueError('Runtime checksum inventory mismatch')
-    private = {'authorized_keys', 'dropbear_ed25519_host_key', 'ssh.enabled', 'startup.log'} if ssh else {'httpd.conf', 'startup.log'}
+    private = {'authorized_keys', 'dropbear_ed25519_host_key', 'ssh.enabled', 'startup.log'} if ssh else {'httpd.conf', 'native-control.key', 'startup.log'}
     if tree(root) - expected - (private if allow_site else set()):
         raise ValueError('Unknown or private runtime files')
     return expected
@@ -153,6 +171,12 @@ def validate_kit(kit, public=False):
     card = kit / 'card'
     http = runtime(card / HTTP, allow_site=not public)
     ssh = runtime(card / SSH, ssh=True, allow_site=not public)
+    if HTTP_CONTROLS <= http:
+        proof = read_json(card / HTTP / 'manifest.json')['controls_provenance']
+        if manifest.get('controls_provenance') != proof:
+            raise ValueError('Package controls provenance is missing or mismatched')
+    elif 'controls_provenance' in manifest:
+        raise ValueError('Package controls provenance requires its complete runtime group')
     expected = (ROOT_FILES - {'SHA256SUMS'}) | {HTTP + '/' + name for name in http} | {SSH + '/' + name for name in ssh}
     if set(sums(card, card / 'SHA256SUMS')) != expected:
         raise ValueError('Card public inventory mismatch')
@@ -213,6 +237,36 @@ def private_input(path, limit):
     if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600:
         raise ValueError('Private host password/key input must be owned by the current user with mode0600')
     return path
+
+
+def native_control_key(data):
+    if type(data) is not bytes or len(data) != 16 or any(value < 33 or value > 126 for value in data):
+        raise ValueError('Native controls require exactly16 printable ASCII key bytes')
+    return data
+
+
+def native_credentials(path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Invalid native controls credential schema')
+            result[key] = value
+        return result
+    try:
+        value = json.loads(private_input(path, 16384).read_bytes(), object_pairs_hook=unique)
+        expected = {'format', 'profile', 'firmware_version', 'app_sha256', 'device_id', 'local_key', 'protocol_version'}
+        if (type(value) is not dict or set(value) != expected
+                or value['format'] != 'lscamoflash-yyos-native-credentials-v1'
+                or value['profile'] != 'lsc-3225722-yyos-14.1.5'
+                or value['firmware_version'] != '14.1.5' or value['app_sha256'] != STOCK_SHA
+                or type(value['protocol_version']) not in (int, float) or value['protocol_version'] != 3.5
+                or type(value['device_id']) is not str or re.fullmatch(r'[A-Za-z0-9]{22}', value['device_id']) is None
+                or type(value['local_key']) is not str):
+            raise ValueError('Invalid native controls credential schema')
+        return native_control_key(value['local_key'].encode('ascii'))
+    except (ValueError, UnicodeError, TypeError):
+        raise ValueError('Invalid private native controls credentials or permissions') from None
 
 
 def private_directory(path):
@@ -320,6 +374,12 @@ def provision(args):
     elif args.client_public_key:
         client = client_key(regular(args.client_public_key, 1024, False).read_bytes())
         host = host_key(private_input(args.host_key, 83).read_bytes())
+    control_key = None
+    if getattr(args, 'native_credentials', None):
+        files = read_json(kit / 'card' / HTTP / 'manifest.json')['files']
+        if not {'bin/yyos-controls', 'COPYING.Controls'} <= set(files):
+            raise ValueError('Native controls credentials require the optional controls payload')
+        control_key = native_credentials(args.native_credentials)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.yyos-provision-', dir=output.parent) as temporary:
         private_directory(Path(temporary))
@@ -329,6 +389,8 @@ def provision(args):
         for name in tree(kit):
             write_host_new(stage / name, (kit / name).read_bytes(), bool((kit / name).stat().st_mode & 0o111))
         write_host_new(stage / 'card' / HTTP / 'httpd.conf', config)
+        if control_key is not None:
+            write_host_new(stage / 'card' / HTTP / 'native-control.key', control_key)
         if client:
             for name, data in (('authorized_keys', client), ('dropbear_ed25519_host_key', host), ('ssh.enabled', b'enabled\n')):
                 write_host_new(stage / 'card' / SSH / name, data)
@@ -339,7 +401,8 @@ def provision(args):
             write_host_new(stage / 'owner_ssh_ed25519', owner_private)
             write_host_new(stage / 'owner_ssh_ed25519.pub', client)
         write_host_new(stage / 'provisioning.json', (json.dumps({'format': FORMAT + '-private', 'web_provisioned': True,
-                  'ssh_provisioned': bool(client), 'owner_client_private_key_outside_card': bool(owner_private)}, indent=2) + '\n').encode())
+                  'ssh_provisioned': bool(client), 'native_controls_provisioned': control_key is not None,
+                  'owner_client_private_key_outside_card': bool(owner_private)}, indent=2) + '\n').encode())
         validate_kit(stage)
         sync_tree(stage)
         output_empty(output)
@@ -348,6 +411,7 @@ def provision(args):
         stage.rename(output)
         sync(output.parent)
     return {'private_output': str(output), 'web_provisioned': True, 'ssh_provisioned': bool(client),
+            'native_controls_provisioned': control_key is not None,
             'owner_private_key': str(output / 'owner_ssh_ed25519') if owner_private else None, 'card_changed': False}
 
 
@@ -445,7 +509,7 @@ def existing_card(mount, kit):
     for name in runtimes:
         public = runtime(mount / name, ssh=name == SSH, allow_site=True)
         expected |= {name + '/' + path for path in public}
-        private = ('authorized_keys', 'dropbear_ed25519_host_key', 'ssh.enabled') if name == SSH else ('httpd.conf',)
+        private = ('authorized_keys', 'dropbear_ed25519_host_key', 'ssh.enabled') if name == SSH else ('httpd.conf', 'native-control.key')
         for relative in private:
             path = mount / name / relative
             if path.exists() or path.is_symlink():
@@ -466,6 +530,10 @@ def site_files(kit, old, replace_web=False):
             result[name] = regular(path, 4096).read_bytes()
     if not replace_web and HTTP + '/httpd.conf' in old['site']:
         result[HTTP + '/httpd.conf'] = old['site'][HTTP + '/httpd.conf']
+    if HTTP + '/native-control.key' in old['site']:
+        result[HTTP + '/native-control.key'] = old['site'][HTTP + '/native-control.key']
+    if HTTP + '/native-control.key' in result:
+        native_control_key(result[HTTP + '/native-control.key'])
     if HTTP + '/httpd.conf' not in result:
         raise ValueError('Provision a private web password before the first installation')
     auth_config(result[HTTP + '/httpd.conf'])
@@ -500,6 +568,8 @@ def install(args, perform=True):
     plan = {'device': identity['device'], 'uuid': identity['uuid'], 'mount': str(mount), 'profile': '3225722 / V14.1.5',
             'public_files': len(public), 'upgrade': bool(old['roots']), 'web_auth': 'existing-preserved' if not args.replace_web_auth and HTTP + '/httpd.conf' in old['site'] else 'provisioned',
             'ssh_enabled': SSH + '/ssh.enabled' in private, 'formatting': False, 'firmware_or_camera_config_written': False}
+    plan['native_controls_key'] = ('existing-preserved' if HTTP + '/native-control.key' in old['site'] else
+                                   'provisioned' if HTTP + '/native-control.key' in private else 'absent')
     if not perform:
         return {**plan, 'installed': False, 'plan_only': True}
     root_fd = os.open(mount, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -580,6 +650,8 @@ def main():
     private.add_argument('--client-public-key', type=Path)
     private.add_argument('--host-key', type=Path)
     private.add_argument('--generate-ssh-keys', action='store_true', help='optional python3-cryptography; client private key stays outside card/')
+    private.add_argument('--native-credentials', type=Path,
+                         help='optional private exact-profile Tuya credentials JSON for controls; never copied wholesale')
     for name in ('plan', 'install'):
         command = commands.add_parser(name, help='validate only' if name == 'plan' else 'write the already mounted removable FAT card')
         command.add_argument('--kit', type=Path, required=True)

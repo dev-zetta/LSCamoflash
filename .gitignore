@@ -87,3 +87,5 @@ SOURCE/yyos-dropbear/
 SOURCE/yyos-ssh-kit/
 SOURCE/yyos-management-kit/
 SOURCE/yyos-release-kit/
+SOURCE/yyos-kit/
+SOURCE/yyos-controls/

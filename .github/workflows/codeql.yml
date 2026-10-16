@@ -109,6 +109,24 @@ jobs:
         cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/fullhan-discovery/discovery.c -o "$RUNNER_TEMP/fullhan-codeql/discovery.o"
         mkdir -p "$RUNNER_TEMP/yyos-codeql"
         cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/yyos-recordings/yyos_recordings.c -o "$RUNNER_TEMP/yyos-codeql/recordings.o"
+        cc -std=c99 -O1 -Wall -Wextra -Werror -c src/contrib/yyos-controls/yyos_controls_cgi.c -o "$RUNNER_TEMP/yyos-codeql/controls-cgi.o"
+        # Parse the production core with its exact pinned LibTomCrypt headers.
+        curl --fail --location --retry 3 https://matt.ucc.asn.au/dropbear/releases/dropbear-2026.94.tar.bz2 -o "$RUNNER_TEMP/yyos-codeql/dropbear-2026.94.tar.bz2"
+        python3 - "$RUNNER_TEMP/yyos-codeql" <<'PY'
+        import importlib.util, pathlib, subprocess, sys
+        path = pathlib.Path('../tools/yyos/build-controls.py')
+        spec = importlib.util.spec_from_file_location('yyos_codeql_controls', path)
+        controls = importlib.util.module_from_spec(spec); spec.loader.exec_module(controls)
+        output = pathlib.Path(sys.argv[1]); helpers = controls.helpers()
+        archive = output / 'dropbear-2026.94.tar.bz2'; helpers.verify_source(archive)
+        source = helpers.unpack_source(archive, output)
+        controls.patch_crypto(source / 'libtomcrypt')
+        subprocess.run(['cc', '-std=c99', '-O1', '-Wall', '-Wextra', '-Werror',
+                        *('-D' + name for name in controls.DEFINITIONS),
+                        '-I' + str(source / 'libtomcrypt/src/headers'), '-c',
+                        'src/contrib/yyos-controls/yyos_controls.c',
+                        '-o', str(output / 'controls.o')], check=True)
+        PY
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3; Node 24
