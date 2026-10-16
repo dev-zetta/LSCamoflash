@@ -118,7 +118,7 @@ def build(args):
             'Repeated reboots were confirmed after an approved 24-byte-password attempt. '
             'Native enablement remains blocked before transport. Recovery and one native-off normal cold boot passed short verification. '
             'A separate controlled 15-byte trial passed short TCP/UDP decoding, RTSP Digest and ONVIF WSSE checks. '
-            'Native-enabled normal cold boot, owner audibility/app checks and long-term stability remain pending; the exact reboot cause is unproven. New UI/payload deployment is separate. '
+            'Native-enabled normal cold boot, owner app checks and long-term stability remain pending; recorded microphone sound was accepted by the owner; the exact reboot cause is unproven. New UI/payload deployment is separate. '
             'See https://github.com/dev-zetta/LSCamoflash/blob/main/docs/yyos-recovery.md. '
             'This kit is not a recovery procedure.\n\n'
             'Experimental exact-profile management for 3225722 / SZ F26312 / V14.1.5. '
